@@ -6,6 +6,8 @@ import { renderSimulation } from "./game/render";
 import { Simulation } from "./game/simulation";
 import type { ScreenState, SimulationSnapshot, UpgradeId } from "./game/types";
 
+const SPEED_MULTIPLIERS = [1, 2, 3, 4] as const;
+
 function readHighScore(): number {
   try {
     const value = localStorage.getItem(STORAGE_HIGH_SCORE);
@@ -49,6 +51,7 @@ export default function App() {
   const [screen, setScreen] = useState<ScreenState>("menu");
   const [cinematic, setCinematic] = useState(false);
   const [debug, setDebug] = useState(false);
+  const [speedMultiplier, setSpeedMultiplier] = useState<(typeof SPEED_MULTIPLIERS)[number]>(1);
   const [highScore, setHighScore] = useState(readHighScore);
   const [snapshot, setSnapshot] = useState<SimulationSnapshot>(() => simulationRef.current!.getSnapshot());
 
@@ -56,6 +59,7 @@ export default function App() {
   const screenRef = useRef(screen);
   const cinematicRef = useRef(cinematic);
   const debugRef = useRef(debug);
+  const speedMultiplierRef = useRef(speedMultiplier);
   const highScoreRef = useRef(highScore);
 
   useEffect(() => {
@@ -73,6 +77,10 @@ export default function App() {
   useEffect(() => {
     debugRef.current = debug;
   }, [debug]);
+
+  useEffect(() => {
+    speedMultiplierRef.current = speedMultiplier;
+  }, [speedMultiplier]);
 
   useEffect(() => {
     highScoreRef.current = highScore;
@@ -120,6 +128,13 @@ export default function App() {
     else if (screenRef.current === "paused") setScreenState("playing");
   };
 
+  const cycleSpeed = () => {
+    setSpeedMultiplier((current) => {
+      const currentIndex = SPEED_MULTIPLIERS.indexOf(current);
+      return SPEED_MULTIPLIERS[(currentIndex + 1) % SPEED_MULTIPLIERS.length];
+    });
+  };
+
   const toggleCinematic = () => {
     const next = !cinematicRef.current;
     setCinematicState(next);
@@ -155,6 +170,8 @@ export default function App() {
         randomizeSeed();
       } else if (key === "c") {
         toggleCinematic();
+      } else if (key === "f") {
+        cycleSpeed();
       } else if (key === "d") {
         setDebug((value) => !value);
       } else if (key === "1") {
@@ -206,9 +223,11 @@ export default function App() {
       last = now;
 
       if (screenRef.current !== "paused") {
-        accumulator += frameDt;
+        const simSpeed = speedMultiplierRef.current;
+        accumulator += frameDt * simSpeed;
         let steps = 0;
-        while (accumulator >= FIXED_DT && steps < 5) {
+        const maxSteps = simSpeed >= 4 ? 8 : simSpeed >= 3 ? 7 : 5;
+        while (accumulator >= FIXED_DT && steps < maxSteps) {
           sim.update(FIXED_DT, {
             cinematic: cinematicRef.current,
             screen: screenRef.current,
@@ -216,7 +235,7 @@ export default function App() {
           accumulator -= FIXED_DT;
           steps += 1;
         }
-        if (steps >= 5) accumulator = 0;
+        if (steps >= maxSteps) accumulator = 0;
       }
 
       if (sim.destroyed) {
@@ -367,6 +386,7 @@ export default function App() {
           {cinematic && screen !== "menu" && (
             <div className="cinematic-status">
               <span>{formatTime(snapshot.time)}</span>
+              <span>{speedMultiplier}x</span>
               {snapshot.eventText && <strong>{snapshot.eventText}</strong>}
             </div>
           )}
@@ -447,6 +467,9 @@ export default function App() {
           <nav className="controls" aria-label="Simulation controls">
             <button type="button" onClick={triggerShockwave} disabled={snapshot.shockCharge < 1 || screen !== "playing"}>
               Shock
+            </button>
+            <button type="button" onClick={cycleSpeed}>
+              Speed {speedMultiplier}x
             </button>
             <button type="button" onClick={togglePause} disabled={screen === "menu" || screen === "coreDestroyed"}>
               {screen === "paused" ? "Resume" : "Pause"}
