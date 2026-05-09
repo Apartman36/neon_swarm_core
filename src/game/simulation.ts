@@ -119,6 +119,7 @@ export class Simulation {
   seed = DEFAULT_SEED;
   rng = new Random(DEFAULT_SEED);
   time = 0;
+  survivedTime = 0;
   cinematic = false;
   destroyed = false;
   screenShake = 0;
@@ -169,6 +170,7 @@ export class Simulation {
     this.rng = new Random(seed);
     this.nextId = 1;
     this.time = 0;
+    this.survivedTime = 0;
     this.destroyed = false;
     this.screenShake = 0;
     this.core = this.createCore();
@@ -269,7 +271,7 @@ export class Simulation {
   getSnapshot(): SimulationSnapshot {
     return {
       seed: this.seed,
-      time: this.time,
+      time: this.destroyed ? this.survivedTime : this.time,
       coreHealth: this.core.health,
       coreEnergy: this.core.energy,
       shockCharge: this.core.shockCharge,
@@ -1290,6 +1292,7 @@ export class Simulation {
   private destroyCore(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.survivedTime = this.time;
     this.core.health = 0;
     this.core.collapseTimer = 0;
     this.screenShake = 1.2;
