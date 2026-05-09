@@ -154,6 +154,7 @@ export class Simulation {
   private nodeUpgradeCooldown = 8;
   private introWaveSpawned = false;
   private introBloomSpawned = false;
+  private nextWaveAt = 7.2;
   private overdriveTimer = 0;
   private menuPulseTimer = 0;
   private repairEventCooldown = 0;
@@ -200,6 +201,7 @@ export class Simulation {
     this.nodeUpgradeCooldown = 8.5;
     this.introWaveSpawned = false;
     this.introBloomSpawned = false;
+    this.nextWaveAt = cinematic ? 5.4 : 7.2;
     this.overdriveTimer = 0;
     this.menuPulseTimer = 0;
     this.repairEventCooldown = 0;
@@ -412,32 +414,43 @@ export class Simulation {
     if (!force && this.core.shockCharge < 1) return false;
 
     const charge = force ? Math.max(this.core.shockCharge, 0.65) : this.core.shockCharge;
-    const radius = 280 + charge * 145;
-    const damage = 54 + charge * 94;
+    const currentBonus = this.shockPowerBonus;
+    const damagePower = 1 + currentBonus;
+    const cleanPower = 1 + currentBonus * 0.8;
+    const radius = (280 + charge * 145) * (1 + currentBonus * 0.34);
+    const damage = (54 + charge * 94) * damagePower;
     this.core.shockCharge = force ? Math.max(0, this.core.shockCharge - 0.82) : 0;
     this.core.pulse = 1.25;
-    this.screenShake = Math.max(this.screenShake, 0.55);
+    this.shocksUsed += 1;
+    this.shockPowerBonus = clamp(this.shockPowerBonus + 0.1, 0, 1.5);
+    this.screenShake = Math.max(this.screenShake, 0.55 + currentBonus * 0.16);
     this.setEvent("Core shockwave", WHITE, 2.1);
     this.addShockwave(this.core.pos, radius, 1.05, WHITE);
+    this.addShockwave(this.core.pos, radius * 0.62, 0.78, CYAN);
 
     for (const virus of this.viruses) {
       const d = distance(virus.pos, this.core.pos);
       if (d < radius) {
         virus.hp -= damage * (1 - d / radius) + 18;
-        virus.vel = add(virus.vel, mul(normalize(sub(virus.pos, this.core.pos)), 180 * (1 - d / radius)));
+        virus.vel = add(virus.vel, mul(normalize(sub(virus.pos, this.core.pos)), 180 * (1 + currentBonus * 0.45) * (1 - d / radius)));
         if (virus.hp <= 0) this.killVirus(virus);
       }
     }
 
     for (const node of this.nodes) {
-      const amount = 0.16 * (1 - smoothstep(100, radius, distance(node.pos, this.core.pos)));
+      const amount = 0.16 * cleanPower * (1 - smoothstep(100, radius, distance(node.pos, this.core.pos)));
       node.infection = clamp(node.infection - amount, 0, 1);
       node.health = clamp(node.health + 12 * amount, 0, node.maxHealth);
     }
     for (const line of this.lines) {
       const midpoint = this.getLinePoint(line, 0.5);
-      const amount = 0.22 * (1 - smoothstep(120, radius, distance(midpoint, this.core.pos)));
+      const amount = 0.22 * cleanPower * (1 - smoothstep(120, radius, distance(midpoint, this.core.pos)));
       line.infection = clamp(line.infection - amount, 0, 1);
+    }
+    for (let i = 0; i < 52; i += 1) {
+      const angle = this.rng.range(0, TAU);
+      const speed = this.rng.range(55, 230) * (1 + currentBonus * 0.28);
+      this.addParticle(this.core.pos, fromAngle(angle, speed), this.rng.pick([WHITE, CYAN, GREEN]), this.rng.range(0.38, 0.9), this.rng.range(1.2, 3.3), 26);
     }
     return true;
   }
@@ -888,7 +901,7 @@ export class Simulation {
       const targetDir = normalize(toTarget);
       const wobble = fromAngle(virus.phase + this.time * (virus.elite ? 2.1 : 3.4), virus.elite ? 0.38 : 0.52);
       const desired = normalize(add(targetDir, wobble));
-      const desiredSpeed = virus.elite ? 52 : 72;
+      const desiredSpeed = virus.speed;
       virus.vel = lerpVec(virus.vel, mul(desired, desiredSpeed), clamp(dt * (virus.elite ? 1.9 : 2.6), 0, 1));
       virus.pos = add(virus.pos, mul(virus.vel, dt));
 
@@ -1003,12 +1016,14 @@ export class Simulation {
       return;
     }
 
-    if (!this.introWaveSpawned && this.time > 2.2) {
+    if (!this.introWaveSpawned && this.time >= this.nextWaveAt) {
       this.introWaveSpawned = true;
-      this.spawnVirusWave(this.rng.pick(["top", "left", "right"]), 11);
-      this.setEvent("Virus wave detected", MAGENTA, 2.4);
+      this.spawnNextWave();
     }
-    if (!this.introBloomSpawned && this.time > 6.4) {
+    if (this.introWaveSpawned && this.time >= this.nextWaveAt) {
+      this.spawnNextWave();
+    }
+    if (!this.introBloomSpawned && this.time > 11.5) {
       this.introBloomSpawned = true;
       this.spawnEnergyBloom(true);
       this.setEvent("Rare energy bloom", GOLD, 2.4);
@@ -1016,27 +1031,23 @@ export class Simulation {
 
     this.directorTimer -= dt;
     if (this.directorTimer > 0) return;
-    this.directorTimer = this.rng.range(5.0, 7.8);
+    this.directorTimer = this.rng.range(6.2, 9.2);
 
     const infection = this.calculateInfection();
-    const activeViruses = this.viruses.filter((virus) => virus.hp > 0).length;
     const roll = this.rng.next();
 
-    if (activeViruses < 12 || roll < 0.25) {
-      this.spawnVirusWave(undefined, this.rng.int(8, 16) + Math.floor(this.time / 32));
-      this.setEvent("Virus wave detected", MAGENTA, 2.3);
-    } else if (roll < 0.4) {
+    if (roll < 0.3) {
       this.spawnEnergyBloom(this.rng.chance(0.55));
       this.setEvent("Rare energy bloom", GOLD, 2.3);
-    } else if (roll < 0.54 && this.core.shockCharge > 0.55) {
+    } else if (roll < 0.43 && this.core.shockCharge > 0.55) {
       this.triggerShockwave(true);
-    } else if (roll < 0.68 && this.nodes.length < MAX_NODES && this.core.energy > this.nodeCost() * 0.72) {
+    } else if (roll < 0.62 && this.nodes.length < MAX_NODES && this.core.energy > this.nodeCost() * 0.72) {
       if (this.addDefenseNode(undefined, this.core.energy < this.nodeCost())) {
         this.setEvent("New defense node constructed", GREEN, 2.3);
       }
-    } else if (roll < 0.79 && this.nodes.some((node) => node.level < 4)) {
+    } else if (roll < 0.74 && this.nodes.some((node) => node.level < 4)) {
       this.upgradeNode(true);
-    } else if (roll < 0.9 || infection < 0.06) {
+    } else if (roll < 0.88 && infection > 0.035) {
       this.triggerInfectionOutbreak();
     } else {
       this.triggerLaserOverdrive();
@@ -1166,6 +1177,23 @@ export class Simulation {
     return true;
   }
 
+  private spawnNextWave(): void {
+    this.wave += 1;
+    const waveIndex = Math.max(0, this.wave - 1);
+    const count = Math.round(clamp((9 + Math.min(3, waveIndex)) * Math.pow(1.1, waveIndex), 9, this.time < 120 ? 18 + this.wave : 42));
+    const scaling = {
+      eliteChance: this.wave <= 2 ? 0.02 : Math.min(0.05 + this.wave * 0.012, 0.24),
+      hpScale: 1 + Math.min(waveIndex * 0.045, 1.1),
+      speedScale: 1 + Math.min(waveIndex * 0.032, 0.55),
+      infectScale: 1 + Math.min(waveIndex * 0.025, 0.45),
+    };
+
+    const eliteSpawned = this.spawnVirusWave(undefined, count, scaling);
+    const waveGap = this.time < 120 ? this.rng.range(25, 30) : this.rng.range(21, 27);
+    this.nextWaveAt = this.time + waveGap;
+    this.setEvent(eliteSpawned ? "Elite virus detected" : `Wave ${this.wave}`, eliteSpawned ? MAGENTA : RED, 2.4);
+  }
+
   private spawnEnergyBloom(rare: boolean): void {
     const angle = this.rng.range(0, TAU);
     const center = {
@@ -1179,9 +1207,19 @@ export class Simulation {
     this.addShockwave(center, rare ? 180 : 130, 1, rare ? GOLD : GREEN);
   }
 
-  private spawnVirusWave(edge?: "top" | "right" | "bottom" | "left", count = 12): void {
+  private spawnVirusWave(
+    edge?: "top" | "right" | "bottom" | "left",
+    count = 12,
+    scaling: { eliteChance: number; hpScale: number; speedScale: number; infectScale: number } = {
+      eliteChance: 0.08,
+      hpScale: 1,
+      speedScale: 1,
+      infectScale: 1,
+    },
+  ): boolean {
     const chosenEdge = edge ?? this.rng.pick(["top", "right", "bottom", "left"] as const);
     const waveCount = Math.min(MAX_VIRUS - this.viruses.length, Math.max(0, count));
+    let eliteSpawned = false;
     for (let i = 0; i < waveCount; i += 1) {
       let pos: Vec2;
       if (chosenEdge === "top") pos = { x: this.rng.range(40, WORLD_WIDTH - 40), y: -28 - i * 3 };
@@ -1189,25 +1227,32 @@ export class Simulation {
       else if (chosenEdge === "left") pos = { x: -28 - i * 3, y: this.rng.range(120, WORLD_HEIGHT - 90) };
       else pos = { x: WORLD_WIDTH + 28 + i * 3, y: this.rng.range(120, WORLD_HEIGHT - 90) };
 
-      const elite = this.rng.chance(0.08 + Math.min(0.12, this.time / 500)) || (i === waveCount - 1 && waveCount > 13 && this.rng.chance(0.45));
+      const elite =
+        this.rng.chance(scaling.eliteChance) ||
+        (this.wave >= 5 && i === waveCount - 1 && waveCount > 13 && this.rng.chance(Math.min(0.5, scaling.eliteChance * 2)));
+      eliteSpawned ||= elite;
+      const baseHp = elite ? 118 + Math.min(this.time * 0.08, 70) : 34 + Math.min(this.time * 0.035, 30);
       this.viruses.push({
         id: this.id(),
         pos,
         vel: fromAngle(this.rng.range(0, TAU), this.rng.range(8, 30)),
-        hp: elite ? 118 + this.time * 0.25 : 34 + this.time * 0.09,
-        maxHp: elite ? 118 + this.time * 0.25 : 34 + this.time * 0.09,
+        speed: (elite ? 52 : 72) * scaling.speedScale,
+        hp: baseHp * scaling.hpScale,
+        maxHp: baseHp * scaling.hpScale,
         radius: elite ? this.rng.range(15, 21) : this.rng.range(6, 10),
         elite,
         phase: this.rng.range(0, TAU),
-        infectPower: elite ? 1.7 : 1,
+        infectPower: (elite ? 1.7 : 1) * scaling.infectScale,
       });
     }
+    return eliteSpawned;
   }
 
   private triggerInfectionOutbreak(): void {
+    const infectionResistance = this.getInfectionResistanceMultiplier();
     const line = this.rng.pick(this.lines);
     if (line) {
-      line.infection = clamp(line.infection + this.rng.range(0.28, 0.48), 0, 1);
+      line.infection = clamp(line.infection + this.rng.range(0.28, 0.48) * infectionResistance, 0, 1);
       const origin = this.getLinePoint(line, this.rng.range(0.2, 0.8));
       this.addShockwave(origin, 125, 0.9, MAGENTA);
       for (let i = 0; i < 34; i += 1) {
@@ -1216,9 +1261,9 @@ export class Simulation {
     }
     if (this.rng.chance(0.45)) {
       const node = this.rng.pick(this.nodes);
-      if (node) node.infection = clamp(node.infection + this.rng.range(0.18, 0.36), 0, 1);
+      if (node) node.infection = clamp(node.infection + this.rng.range(0.18, 0.36) * infectionResistance, 0, 1);
     }
-    this.setEvent("Sector infection outbreak", MAGENTA, 2.3);
+    this.setEvent("Outbreak", MAGENTA, 2.3);
   }
 
   private triggerLaserOverdrive(): void {

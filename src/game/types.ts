@@ -93,6 +93,7 @@ export interface Virus {
   id: number;
   pos: Vec2;
   vel: Vec2;
+  speed: number;
   hp: number;
   maxHp: number;
   radius: number;

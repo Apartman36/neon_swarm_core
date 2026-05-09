@@ -45,6 +45,7 @@ export function renderSimulation(ctx: CanvasRenderingContext2D, sim: Simulation,
   drawParticles(ctx, sim);
   drawShockwaves(ctx, sim);
   drawCore(ctx, sim);
+  drawScreenPulse(ctx, sim);
   drawEventLabel(ctx, sim, options);
   if (options.debug) drawDebug(ctx, sim);
 
@@ -240,14 +241,15 @@ function drawWorkers(ctx: CanvasRenderingContext2D, sim: Simulation): void {
 function drawNodes(ctx: CanvasRenderingContext2D, sim: Simulation): void {
   ctx.save();
   ctx.globalCompositeOperation = "lighter";
+  const fireUpgrade = sim.upgradeLevels.nodeFireRate;
   for (const node of sim.nodes) {
     const built = clamp(node.buildProgress, 0, 1);
     const infection = node.infection;
     const disabled = node.health <= 1 || infection > 0.88;
-    const baseColor = disabled ? MAGENTA : infection > 0.32 ? MAGENTA : node.overdrive > 0 ? WHITE : GREEN;
-    const radius = 15 + node.level * 3.2;
+    const baseColor = disabled ? MAGENTA : infection > 0.32 ? MAGENTA : node.overdrive > 0 ? WHITE : fireUpgrade >= 5 ? CYAN : GREEN;
+    const radius = 15 + node.level * 3.2 + fireUpgrade * 0.35;
 
-    ctx.strokeStyle = colorWithAlpha(infection > 0.25 ? MAGENTA : CYAN, 0.045 * built);
+    ctx.strokeStyle = colorWithAlpha(infection > 0.25 ? MAGENTA : CYAN, (0.045 + fireUpgrade * 0.003) * built);
     ctx.lineWidth = 1;
     ctx.shadowBlur = 0;
     ctx.beginPath();
@@ -463,6 +465,21 @@ function drawCore(ctx: CanvasRenderingContext2D, sim: Simulation): void {
     }
   }
 
+  ctx.restore();
+}
+
+function drawScreenPulse(ctx: CanvasRenderingContext2D, sim: Simulation): void {
+  const pulse = clamp(sim.core.pulse - 0.72, 0, 0.55);
+  if (pulse <= 0) return;
+
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const gradient = ctx.createRadialGradient(sim.core.pos.x, sim.core.pos.y, 80, sim.core.pos.x, sim.core.pos.y, 780);
+  gradient.addColorStop(0, `rgba(245, 251, 255, ${0.07 * pulse})`);
+  gradient.addColorStop(0.45, `rgba(69, 234, 255, ${0.055 * pulse})`);
+  gradient.addColorStop(1, "rgba(69, 234, 255, 0)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
   ctx.restore();
 }
 
