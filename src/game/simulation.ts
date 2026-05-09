@@ -70,7 +70,7 @@ const MAGENTA = "#ff3df2";
 const RED = "#ff315f";
 const WHITE = "#f5fbff";
 
-const UPGRADE_MAX_LEVEL = 8;
+const UPGRADE_MAX_LEVEL = 10;
 
 export const UPGRADE_DEFINITIONS: UpgradeDefinition[] = [
   {
@@ -105,6 +105,22 @@ export const UPGRADE_DEFINITIONS: UpgradeDefinition[] = [
     shortcut: "4",
     maxLevel: UPGRADE_MAX_LEVEL,
   },
+  {
+    id: "workerSystems",
+    label: "Worker Systems",
+    shortLabel: "Workers",
+    description: "Increases worker capacity and rebuild speed.",
+    shortcut: "5",
+    maxLevel: UPGRADE_MAX_LEVEL,
+  },
+  {
+    id: "shockPower",
+    label: "Shock Power",
+    shortLabel: "Shock",
+    description: "Increases Shock damage, cleaning, radius, and repel strength.",
+    shortcut: "6",
+    maxLevel: UPGRADE_MAX_LEVEL,
+  },
 ];
 
 function createUpgradeLevels(): UpgradeLevels {
@@ -113,6 +129,8 @@ function createUpgradeLevels(): UpgradeLevels {
     nodeFireRate: 0,
     coreShield: 0,
     repairPower: 0,
+    workerSystems: 0,
+    shockPower: 0,
   };
 }
 
@@ -139,7 +157,6 @@ export class Simulation {
   upgradePoints = 0;
   upgradeLevels: UpgradeLevels = createUpgradeLevels();
   upgradesPurchased = 0;
-  shockPowerBonus = 0;
   wave = 0;
   maxInfection = 0;
   nodesBuilt = 0;
@@ -191,7 +208,6 @@ export class Simulation {
     this.upgradePoints = 0;
     this.upgradeLevels = createUpgradeLevels();
     this.upgradesPurchased = 0;
-    this.shockPowerBonus = 0;
     this.wave = 0;
     this.maxInfection = 0;
     this.nodesBuilt = 0;
@@ -285,7 +301,7 @@ export class Simulation {
       coreHealth: this.core.health,
       coreEnergy: this.core.energy,
       shockCharge: this.core.shockCharge,
-      shockPowerBonus: this.shockPowerBonus,
+      shockPower: this.getShockPowerMultiplier(),
       upgradePoints: this.upgradePoints,
       upgrades: { ...this.upgradeLevels },
       upgradesPurchased: this.upgradesPurchased,
@@ -315,6 +331,7 @@ export class Simulation {
         ...upgrade,
         level,
         cost,
+        valueLabel: this.getUpgradeValueLabel(upgrade.id),
         canBuy: !maxed && this.upgradePoints >= cost,
         maxed,
       };
@@ -346,6 +363,12 @@ export class Simulation {
     if (id === "coreShield") {
       this.core.health = clamp(this.core.health + 3.5, 0, this.core.maxHealth);
     }
+    if (id === "workerSystems") {
+      this.workerRebuildTimer = Math.min(this.workerRebuildTimer, 0.28);
+    }
+    if (id === "shockPower") {
+      this.core.shockCharge = clamp(this.core.shockCharge + 0.08, 0, 1);
+    }
 
     this.setEvent(`${definition.shortLabel} upgraded`, CYAN, 1.8);
     this.addShockwave(this.core.pos, 150 + this.upgradesPurchased * 2, 0.72, CYAN);
@@ -370,7 +393,7 @@ export class Simulation {
     if (this.cinematicUpgradeTimer > 0 || this.upgradePoints <= 0) return;
 
     this.cinematicUpgradeTimer = 4.2;
-    const priority: UpgradeId[] = ["swarmSpeed", "nodeFireRate", "coreShield", "repairPower"];
+    const priority: UpgradeId[] = ["swarmSpeed", "nodeFireRate", "workerSystems", "coreShield", "repairPower", "shockPower"];
     const affordable = priority
       .map((id) => ({ id, level: this.upgradeLevels[id], cost: this.getUpgradeCost(id) }))
       .filter((upgrade) => this.upgradePoints >= upgrade.cost)
@@ -404,15 +427,53 @@ export class Simulation {
   }
 
   private getWorkerGrowthMultiplier(): number {
-    return 1;
+    return 1 + this.upgradeLevels.workerSystems * 0.1;
   }
 
   private getWorkerCapacity(): number {
-    return clamp(this.cinematic ? CINEMATIC_WORKERS : INITIAL_WORKERS, 80, MAX_WORKERS);
+    const baseCapacity = this.cinematic ? CINEMATIC_WORKERS : INITIAL_WORKERS;
+    const capacityGain = this.cinematic ? 3 : 5;
+    return clamp(Math.round(baseCapacity + this.upgradeLevels.workerSystems * capacityGain), 80, MAX_WORKERS);
   }
 
   private getWorkerRebuildCost(): number {
-    return 9.5 + Math.max(0, this.workers.length - 90) * 0.035;
+    return Math.max(7.5, 9.5 + Math.max(0, this.workers.length - 90) * 0.035 - this.upgradeLevels.workerSystems * 0.18);
+  }
+
+  private getShockPowerMultiplier(): number {
+    return 1 + this.upgradeLevels.shockPower * 0.12;
+  }
+
+  private getShockRadiusMultiplier(): number {
+    return 1 + this.upgradeLevels.shockPower * 0.035;
+  }
+
+  private getShockCleaningMultiplier(): number {
+    return 1 + this.upgradeLevels.shockPower * 0.08;
+  }
+
+  private getShockRepelMultiplier(): number {
+    return 1 + this.upgradeLevels.shockPower * 0.06;
+  }
+
+  private getShieldEffectivenessMultiplier(): number {
+    return 1 / this.getCoreDamageMultiplier();
+  }
+
+  private getUpgradeValueLabel(id: UpgradeId): string {
+    const value =
+      id === "swarmSpeed"
+        ? this.getWorkerSpeedMultiplier()
+        : id === "nodeFireRate"
+          ? this.getNodeFireRateMultiplier()
+          : id === "coreShield"
+            ? this.getShieldEffectivenessMultiplier()
+            : id === "repairPower"
+              ? this.getRepairMultiplier()
+              : id === "workerSystems"
+                ? this.getWorkerGrowthMultiplier()
+                : this.getShockPowerMultiplier();
+    return `${Math.round(value * 100)}%`;
   }
 
   addBeacon(pos: Vec2): void {
@@ -436,16 +497,16 @@ export class Simulation {
     if (!force && this.core.shockCharge < 1) return false;
 
     const charge = force ? Math.max(this.core.shockCharge, 0.65) : this.core.shockCharge;
-    const currentBonus = this.shockPowerBonus;
-    const damagePower = 1 + currentBonus;
-    const cleanPower = 1 + currentBonus * 0.8;
-    const radius = (280 + charge * 145) * (1 + currentBonus * 0.34);
+    const shockLevel = this.upgradeLevels.shockPower;
+    const damagePower = this.getShockPowerMultiplier();
+    const cleanPower = this.getShockCleaningMultiplier();
+    const repelPower = this.getShockRepelMultiplier();
+    const radius = (280 + charge * 145) * this.getShockRadiusMultiplier();
     const damage = (54 + charge * 94) * damagePower;
     this.core.shockCharge = force ? Math.max(0, this.core.shockCharge - 0.82) : 0;
     this.core.pulse = 1.25;
     this.shocksUsed += 1;
-    this.shockPowerBonus = clamp(this.shockPowerBonus + 0.1, 0, 1.5);
-    this.screenShake = Math.max(this.screenShake, 0.55 + currentBonus * 0.16);
+    this.screenShake = Math.max(this.screenShake, 0.55 + (damagePower - 1) * 0.08);
     this.setEvent("Core shockwave", WHITE, 2.1);
     this.addShockwave(this.core.pos, radius, 1.05, WHITE);
     this.addShockwave(this.core.pos, radius * 0.62, 0.78, CYAN);
@@ -454,7 +515,7 @@ export class Simulation {
       const d = distance(virus.pos, this.core.pos);
       if (d < radius) {
         virus.hp -= damage * (1 - d / radius) + 18;
-        virus.vel = add(virus.vel, mul(normalize(sub(virus.pos, this.core.pos)), 180 * (1 + currentBonus * 0.45) * (1 - d / radius)));
+        virus.vel = add(virus.vel, mul(normalize(sub(virus.pos, this.core.pos)), 180 * repelPower * (1 - d / radius)));
         if (virus.hp <= 0) this.killVirus(virus);
       }
     }
@@ -469,9 +530,9 @@ export class Simulation {
       const amount = 0.22 * cleanPower * (1 - smoothstep(120, radius, distance(midpoint, this.core.pos)));
       line.infection = clamp(line.infection - amount, 0, 1);
     }
-    for (let i = 0; i < 52; i += 1) {
+    for (let i = 0; i < 52 + shockLevel * 2; i += 1) {
       const angle = this.rng.range(0, TAU);
-      const speed = this.rng.range(55, 230) * (1 + currentBonus * 0.28);
+      const speed = this.rng.range(55, 230) * (1 + (damagePower - 1) * 0.18);
       this.addParticle(this.core.pos, fromAngle(angle, speed), this.rng.pick([WHITE, CYAN, GREEN]), this.rng.range(0.38, 0.9), this.rng.range(1.2, 3.3), 26);
     }
     return true;

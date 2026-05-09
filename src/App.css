@@ -175,11 +175,14 @@ button {
 
 .upgrade-list button {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "name value"
+    "level cost";
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 5px;
-  min-height: 32px;
-  padding: 0 7px;
+  min-height: 40px;
+  padding: 6px 7px;
   border: 1px solid rgba(142, 239, 255, 0.2);
   border-radius: 7px;
   background: rgba(6, 20, 32, 0.72);
@@ -201,6 +204,7 @@ button {
 }
 
 .upgrade-name,
+.upgrade-value,
 .upgrade-level,
 .upgrade-cost {
   overflow: hidden;
@@ -208,10 +212,28 @@ button {
   white-space: nowrap;
 }
 
+.upgrade-name {
+  grid-area: name;
+}
+
+.upgrade-value {
+  grid-area: value;
+  color: #f4fdff;
+  font-size: 10px;
+}
+
 .upgrade-level,
 .upgrade-cost {
   color: rgba(201, 238, 244, 0.72);
   font-size: 9px;
+}
+
+.upgrade-level {
+  grid-area: level;
+}
+
+.upgrade-cost {
+  grid-area: cost;
 }
 
 .cinematic-status {
@@ -535,14 +557,9 @@ h2 {
   }
 
   .upgrade-list button {
-    grid-template-columns: minmax(0, 1fr) auto;
-    min-height: 30px;
+    min-height: 38px;
     padding: 0 5px;
     font-size: 9px;
-  }
-
-  .upgrade-cost {
-    display: none;
   }
 
   .overlay {

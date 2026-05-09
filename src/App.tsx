@@ -37,10 +37,6 @@ function percent(value: number): string {
   return `${Math.round(value * 100)}%`;
 }
 
-function bonusPercent(value: number): string {
-  return `+${Math.round(value * 100)}%`;
-}
-
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const audioRef = useRef<GameAudio | null>(null);
@@ -215,6 +211,10 @@ export default function App() {
         purchaseUpgrade("coreShield");
       } else if (key === "4") {
         purchaseUpgrade("repairPower");
+      } else if (key === "5") {
+        purchaseUpgrade("workerSystems");
+      } else if (key === "6") {
+        purchaseUpgrade("shockPower");
       } else if (key === "p" || key === "escape") {
         togglePause();
       }
@@ -403,7 +403,7 @@ export default function App() {
               <div className="stat">
                 <span>Shock</span>
                 <strong>{percent(snapshot.shockCharge)}</strong>
-                <small>Power {bonusPercent(snapshot.shockPowerBonus)}</small>
+                <small>Power {percent(snapshot.shockPower)}</small>
               </div>
             </div>
           )}
@@ -424,8 +424,9 @@ export default function App() {
                     title={`${upgrade.description} Shortcut ${upgrade.shortcut}.`}
                   >
                     <span className="upgrade-name">{upgrade.shortLabel}</span>
+                    <span className="upgrade-value">{upgrade.valueLabel}</span>
                     <span className="upgrade-level">Lv {upgrade.level}</span>
-                    <span className="upgrade-cost">{upgrade.maxed ? "Max" : `${upgrade.cost} pt`}</span>
+                    <span className="upgrade-cost">{upgrade.maxed ? "MAX" : `${upgrade.cost} pt`}</span>
                   </button>
                 ))}
               </div>
