@@ -1,6 +1,6 @@
 # Neon Swarm Core
 
-An autoplay neon colony-defense simulation built with React, TypeScript, Vite, and HTML5 Canvas.
+An autoplay neon colony-defense simulation turned into a light playable survival game with React, TypeScript, Vite, Web Audio, and HTML5 Canvas.
 
 ## Run
 
@@ -20,6 +20,12 @@ npm run build
 ## Controls
 
 - `Space` - trigger Core shockwave when charged
+- `1` - upgrade Swarm Speed
+- `2` - upgrade Node Fire Rate
+- `3` - upgrade Core Shield
+- `4` - upgrade Repair Power
+- `F` - cycle simulation speed, 1x to 4x
+- `M` - mute/unmute procedural audio
 - `P` or `Escape` - pause/resume
 - `R` - restart current seed
 - `N` - random new seed
@@ -27,6 +33,11 @@ npm run build
 - `D` - toggle debug overlay
 - Click/tap the board - place a temporary energy beacon
 
+## Guides
+
+- [GAME_GUIDE.md](./GAME_GUIDE.md) - short player guide
+- [DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md) - mechanics guide and implementation audit
+
 ## Notes
 
-The simulation uses a deterministic seeded PRNG, no external art assets, no audio files, and code-generated canvas visuals only.
+The simulation uses a deterministic seeded PRNG, no external art assets, no audio files, procedural Web Audio, and code-generated canvas visuals only.
