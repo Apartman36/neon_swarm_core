@@ -1,6 +1,6 @@
-# Neon Swarm Core v2 Developer Mechanics Guide
+# Neon Swarm Core v2.1 Developer Mechanics Guide
 
-This guide reflects the implemented v2 code in `src/`. It is an audit of the actual mechanics, not a design target.
+This guide reflects the implemented v2.1 code in `src/`. It is an audit of the actual mechanics, not a design target.
 
 ## Project Structure
 
@@ -10,7 +10,7 @@ This guide reflects the implemented v2 code in `src/`. It is an audit of the act
 - `src/game/render.ts`: Canvas renderer for background, traces, lines, workers, nodes, viruses, beams, particles, Shock rings, Core, event labels.
 - `src/game/audio.ts`: lazy Web Audio procedural sound layer.
 - `src/game/types.ts`: entity, snapshot, upgrade, and render option types.
-- `src/game/constants.ts`: world size, initial counts, caps, seed, storage key.
+- `src/game/constants.ts`: world size, gameplay bounds, initial counts, caps, seed, storage key.
 - `src/game/math.ts`, `src/game/random.ts`, `src/game/input.ts`: helpers.
 
 ## Main Loop
@@ -27,28 +27,58 @@ The speed button multiplies accumulated simulation time by `1`, `2`, `3`, or `4`
 
 If the cap is reached, the leftover accumulator is dropped to avoid runaway catch-up.
 
-## Entities
+## HUD And Layout
 
-- Core: health, energy, Shock charge, pulse, damage flash, collapse timer.
-- Workers: search, carry, repair, flee, or beacon states; collect energy and repair infection.
-- Energy particles: normal or rare pickups with value and lifetime.
-- Defense nodes: auto-built and auto-upgraded using Core energy; fire beams at viruses.
-- Circuit lines: connect Core/nodes and store infection.
-- Viruses: spawned by waves; target Core or nodes; damage, infect, and can be elite.
-- Beams, particles, Shockwaves, beacons, traces, event labels: visual systems.
+The frame remains a vertical 900x1600 world rendered into a 9:16 shell. The bottom HUD is a five-stat row: Energy, Infection, Workers, Nodes, and Shock. Workers display current/capacity. Shock displays charge and current Shock power.
+
+The normal-mode event label is rendered at `GAMEPLAY_BOUNDS.minY - 42`, below the upgrade panel and above the main gameplay field. Cinematic event labels stay near the top.
+
+Important activity is kept away from the bottom HUD by `GAMEPLAY_BOUNDS`:
+
+- `minX = 54`
+- `maxX = WORLD_WIDTH - 54`
+- `minY = 330`
+- `maxY = WORLD_HEIGHT - 225`
+
+Energy, beacons, node placement, bloom centers, and worker movement are clamped into or near these bounds. This keeps nodes and worker activity from sitting behind the lower stat cards.
 
 ## Upgrade System
 
-Upgrade Points are earned in `updateUpgradePoints()`: +1 point every 5 simulated seconds while not on the menu and while the Core is alive. Cinematic Mode auto-spends one affordable upgrade every 4.2 seconds using this priority: Swarm Speed, Node Fire Rate, Core Shield, Repair Power, preferring the lowest level.
+Upgrade Points are earned in `updateUpgradePoints()`: +1 point every 5 simulated seconds while not on the menu and while the Core is alive. Cost is `1 + currentLevel`. All six upgrades have max level 10.
 
-All four upgrades have max level 8. Cost is `1 + currentLevel`.
+Cinematic Mode auto-spends one affordable upgrade every 4.2 seconds using this priority: Speed, Fire, Workers, Shield, Repair, Shock, preferring the lowest level.
 
-- Swarm Speed: worker movement multiplier is `1 + level * 0.045`; delivered energy multiplier is `1 + level * 0.025`.
-- Node Fire Rate: node cooldown uses fire-rate multiplier `1 + level * 0.075`; node spin, beam width, and node color get subtle visual boosts.
-- Core Shield: Core damage multiplier is `1 - min(0.44, level * 0.055)`; infection pressure multiplier is `1 - min(0.34, level * 0.04)`.
-- Repair Power: worker repair multiplier is `1 + level * 0.12`; higher levels emit more visible repair particles.
+Upgrade card values are generated from the same helper methods used by gameplay:
 
-Upgrade purchases increment `upgradesPurchased`, pulse the Core, and emit a small Core-centered effect.
+- Speed: worker movement multiplier `1 + level * 0.045`; delivered energy multiplier `1 + level * 0.025`. UI shows movement multiplier.
+- Fire: node fire-rate multiplier `1 + level * 0.075`; node spin and beam width also increase, and high Fire levels brighten beam/node color.
+- Shield: Core damage multiplier `1 - min(0.44, level * 0.055)`; infection resistance multiplier `1 - min(0.34, level * 0.04)`. UI shows `1 / damageMultiplier`.
+- Repair: worker repair multiplier `1 + level * 0.12`; higher levels emit more repair particles.
+- Workers: rebuild/growth multiplier `1 + level * 0.1`; capacity rises by `level * 5` in Normal Mode and `level * 3` in Cinematic Mode, clamped by `MAX_WORKERS`.
+- Shock: damage multiplier `1 + level * 0.12`; radius multiplier `1 + level * 0.035`; cleaning multiplier `1 + level * 0.08`; repel multiplier `1 + level * 0.06`.
+
+Keyboard shortcuts remain `1` through `6`, but the visible upgrade cards do not show number badges.
+
+## Worker Lifecycle
+
+Initial worker count equals current capacity at reset. Base capacity is `INITIAL_WORKERS = 118` in Normal Mode and `CINEMATIC_WORKERS = 138` in Cinematic Mode. `MAX_WORKERS = 168`.
+
+Workers can be lost only outside the menu. Loss is globally rate-limited by `workerLossCooldown`, and the simulation will not drop below `max(46, capacity * 0.46)` workers.
+
+Loss sources:
+
+- Direct virus contact: distance below `virus.radius + 7` for normal viruses or `virus.radius + 10` for elites. Per-frame chance is `dt * 0.66` for normal viruses or `dt * 1.05` for elites, capped at `0.16`.
+- General danger: `avoidanceStrength * 0.45 + infection * 0.9` must exceed `0.7`, then loss chance is `dt * 0.018 * danger`.
+
+When a worker is lost, cooldown is `1.25-2.1s` for normal danger or `0.9-1.45s` for elite contact. Carrying workers may drop a replacement energy pickup at their position with 45% normal or 75% rare chance.
+
+The Core rebuilds workers automatically in `updateWorkerRebuild()` when below capacity:
+
+- Rebuilding does not run in the menu.
+- Timer drains by `dt * workerGrowthMultiplier * lerp(1, 1.65, missingRatio)`.
+- Spawn interval after a rebuild is `1.55-2.45s / workerGrowthMultiplier`.
+- Rebuild cost is `max(7.5, 9.5 + max(0, workers - 90) * 0.035 - workerLevel * 0.18)`.
+- The Core keeps an energy reserve of `14`, or `4` if more than 22% of workers are missing.
 
 ## Shock
 
@@ -57,17 +87,22 @@ Upgrade purchases increment `upgradesPurchased`, pulse the Core, and emit a smal
 Current Shock formulas:
 
 - `charge = force ? max(core.shockCharge, 0.65) : core.shockCharge`
-- `currentBonus = shockPowerBonus`
-- radius: `(280 + charge * 145) * (1 + currentBonus * 0.34)`
-- damage: `(54 + charge * 94) * (1 + currentBonus)`
-- infection cleaning multiplier: `1 + currentBonus * 0.8`
-- repel velocity: `180 * (1 + currentBonus * 0.45) * distanceFalloff`
+- `damagePower = 1 + shockLevel * 0.12`
+- `radiusPower = 1 + shockLevel * 0.035`
+- `cleanPower = 1 + shockLevel * 0.08`
+- `repelPower = 1 + shockLevel * 0.06`
+- radius: `(280 + charge * 145) * radiusPower`
+- damage: `(54 + charge * 94) * damagePower`
+- repel velocity: `180 * repelPower * distanceFalloff`
+- particles: `52 + shockLevel * 2`
 
-Each successful Shock increments `shocksUsed` and raises `shockPowerBonus` by `0.1`, capped at `1.5` (+150%). Shock damages and repels viruses inside radius, reduces node and line infection near the Core, heals nearby nodes slightly, spawns two expanding rings, adds particles, increases Core pulse, and increases screen shake.
+Successful Shock increments `shocksUsed`, consumes charge, pulses the Core, damages and repels viruses inside radius, reduces node and line infection near the Core, heals nearby nodes slightly through the cleaning effect, spawns two expanding rings, adds particles, and increases screen shake.
+
+There is no passive per-use Shock power scaling in v2.1. Shock growth comes only from the Shock upgrade.
 
 ## Wave And Threat Scaling
 
-Virus pacing is explicit in `spawnNextWave()`:
+Virus pacing is unchanged from v2:
 
 - First wave starts at about `7.2s` in Normal Mode and `5.4s` in Cinematic Mode.
 - New waves spawn every `25-30s` before 120 seconds, then every `21-27s`.
@@ -79,8 +114,6 @@ Virus pacing is explicit in `spawnNextWave()`:
 - Infect scale is `1 + min(waveIndex * 0.025, 0.45)`.
 
 Base virus HP is `34 + min(time * 0.035, 30)`. Base elite HP is `118 + min(time * 0.08, 70)`. Base speed is `72` normal and `52` elite, multiplied by wave speed scale. Elite infect power starts at `1.7`, normal at `1.0`, then uses wave infect scale.
-
-The secondary director no longer spawns random virus waves. It handles energy blooms, forced Shock, auto node construction, auto node upgrades, infection outbreaks, and laser overdrive.
 
 ## Infection Calculation
 
@@ -98,8 +131,9 @@ Line infection passively decays by `dt * 0.006`. Node infection receives connect
 
 Ambient energy spawns every `0.22-0.62s` outside the menu, capped by `MAX_ENERGY = 96`. Normal energy is worth about `4-7.5`; rare energy is worth about `13-20`. Workers deliver energy to the Core, increment `energyCollected`, and charge Shock by `value / 120` or `value / 70` for rare energy.
 
-Core energy is spent automatically on Core repair, node construction, and node upgrades:
+Core energy is spent automatically on Core repair, worker rebuilding, node construction, and node upgrades:
 
+- Worker rebuild cost: see Worker Lifecycle.
 - Node cost: `36 + nodes.length * 12`.
 - Automatic node upgrade cost: `34 + node.level * 24`.
 - Node max level for auto upgrades is 4.
@@ -120,7 +154,7 @@ Events: energy delivered, node laser tick, wave warning, upgrade chime, Shock ba
 
 ## Performance Notes
 
-- World and entity counts are capped: workers 150, energy 96, viruses 88, particles 720, beams 60, Shockwaves 12, nodes 15.
+- World and entity counts are capped: workers 168, energy 96, viruses 88, particles 720, beams 60, Shockwaves 12, nodes 15.
 - Cleanup slices arrays back to caps after each update.
 - Fixed-step simulation avoids frame-rate dependent physics.
 - Speed mode drops excess accumulated time after substep caps, which favors stability over exact catch-up.
@@ -132,11 +166,12 @@ Events: energy delivered, node laser tick, wave warning, upgrade chime, Shock ba
 - There is no save file for upgrade progress because each run is self-contained.
 - High score uses localStorage only.
 - Cinematic auto-spending is simple and does not adapt deeply to threat state.
+- Worker deaths are intentionally soft and rate-limited; they add colony motion, not harsh attrition.
 - Audio is intentionally minimal and depends on browser autoplay/user-gesture policies.
 
 ## Safe Balance Tuning
 
-- Keep `MAX_VIRUS`, `MAX_PARTICLES`, and substep caps conservative before raising visual density.
+- Keep `MAX_VIRUS`, `MAX_PARTICLES`, `MAX_WORKERS`, and substep caps conservative before raising visual density.
 - Tune wave count, elite chance, HP scale, speed scale, and infect scale in `spawnNextWave()` together; changing only one can create unreadable difficulty spikes.
 - Adjust upgrade multipliers in their helper methods rather than scattering numbers through update code.
 - Keep Shock radius growth lower than damage growth. Radius affects readability and can wipe too much of the board.
