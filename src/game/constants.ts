@@ -19,7 +19,7 @@ export const GAMEPLAY_BOUNDS = {
 
 export const INITIAL_WORKERS = 118;
 export const CINEMATIC_WORKERS = 138;
-export const MAX_WORKERS = 150;
+export const MAX_WORKERS = 168;
 export const MAX_ENERGY = 96;
 export const MAX_VIRUS = 88;
 export const MAX_PARTICLES = 720;

@@ -171,6 +171,7 @@ export interface SimulationSnapshot {
   upgrades: UpgradeLevels;
   upgradesPurchased: number;
   workers: number;
+  workerCapacity: number;
   infection: number;
   maxInfection: number;
   nodes: number;

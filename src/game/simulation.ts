@@ -154,6 +154,9 @@ export class Simulation {
   private directorTimer = 2.4;
   private nodeBuildCooldown = 4.5;
   private nodeUpgradeCooldown = 8;
+  private workerRebuildTimer = 1.8;
+  private workerLossCooldown = 0;
+  private workerEventCooldown = 0;
   private introWaveSpawned = false;
   private introBloomSpawned = false;
   private nextWaveAt = 7.2;
@@ -202,6 +205,9 @@ export class Simulation {
     this.directorTimer = cinematic ? 2.8 : 3.4;
     this.nodeBuildCooldown = 5.2;
     this.nodeUpgradeCooldown = 8.5;
+    this.workerRebuildTimer = 1.8;
+    this.workerLossCooldown = 0;
+    this.workerEventCooldown = 0;
     this.introWaveSpawned = false;
     this.introBloomSpawned = false;
     this.nextWaveAt = cinematic ? 5.4 : 7.2;
@@ -209,7 +215,7 @@ export class Simulation {
     this.menuPulseTimer = 0;
     this.repairEventCooldown = 0;
 
-    const workerCount = clamp(cinematic ? CINEMATIC_WORKERS : INITIAL_WORKERS, 80, MAX_WORKERS);
+    const workerCount = this.getWorkerCapacity();
     for (let i = 0; i < workerCount; i += 1) {
       this.workers.push(this.createWorker());
     }
@@ -253,10 +259,13 @@ export class Simulation {
     this.core.damageFlash = Math.max(0, this.core.damageFlash - dt * 2.4);
     this.eventLabel.life = Math.max(0, this.eventLabel.life - dt);
     this.repairEventCooldown = Math.max(0, this.repairEventCooldown - dt);
+    this.workerLossCooldown = Math.max(0, this.workerLossCooldown - dt);
+    this.workerEventCooldown = Math.max(0, this.workerEventCooldown - dt);
 
     this.updateUpgradePoints(dt, options.screen);
     this.updateAmbientEnergy(dt, options.screen);
-    this.updateWorkers(dt);
+    this.updateWorkerRebuild(dt, options.screen);
+    this.updateWorkers(dt, options.screen);
     this.updateNodes(dt);
     this.updateViruses(dt, options.screen);
     this.updateInfection(dt);
@@ -281,6 +290,7 @@ export class Simulation {
       upgrades: { ...this.upgradeLevels },
       upgradesPurchased: this.upgradesPurchased,
       workers: this.workers.length,
+      workerCapacity: this.getWorkerCapacity(),
       infection: this.calculateInfection(),
       maxInfection: this.maxInfection,
       nodes: this.nodes.filter((node) => node.buildProgress >= 1).length,
@@ -391,6 +401,18 @@ export class Simulation {
 
   private getRepairMultiplier(): number {
     return 1 + this.upgradeLevels.repairPower * 0.12;
+  }
+
+  private getWorkerGrowthMultiplier(): number {
+    return 1;
+  }
+
+  private getWorkerCapacity(): number {
+    return clamp(this.cinematic ? CINEMATIC_WORKERS : INITIAL_WORKERS, 80, MAX_WORKERS);
+  }
+
+  private getWorkerRebuildCost(): number {
+    return 9.5 + Math.max(0, this.workers.length - 90) * 0.035;
   }
 
   addBeacon(pos: Vec2): void {
@@ -603,13 +625,49 @@ export class Simulation {
     }
   }
 
-  private updateWorkers(dt: number): void {
+  private updateWorkerRebuild(dt: number, screen: ScreenState): void {
+    if (screen === "menu") return;
+    const capacity = this.getWorkerCapacity();
+    if (this.workers.length >= capacity) {
+      this.workerRebuildTimer = Math.min(this.workerRebuildTimer, 1.4);
+      return;
+    }
+
+    const missingRatio = clamp((capacity - this.workers.length) / capacity, 0, 1);
+    this.workerRebuildTimer -= dt * this.getWorkerGrowthMultiplier() * lerp(1, 1.65, missingRatio);
+    if (this.workerRebuildTimer > 0) return;
+
+    const cost = this.getWorkerRebuildCost();
+    const reserve = missingRatio > 0.22 ? 4 : 14;
+    if (this.core.energy < cost + reserve) {
+      this.workerRebuildTimer = 0.7;
+      return;
+    }
+
+    this.core.energy = Math.max(0, this.core.energy - cost);
+    const worker = this.createWorker();
+    worker.state = "search";
+    worker.vel = fromAngle(this.rng.range(0, TAU), this.rng.range(35, 74));
+    this.workers.push(worker);
+    this.core.pulse = Math.max(this.core.pulse, 0.58);
+    this.workerRebuildTimer = this.rng.range(1.55, 2.45) / this.getWorkerGrowthMultiplier();
+    if (this.workerEventCooldown <= 0) {
+      this.workerEventCooldown = 9;
+      this.setEvent("Worker rebuilt", GREEN, 1.7);
+    }
+    for (let i = 0; i < 12; i += 1) {
+      this.addParticle(worker.pos, fromAngle(this.rng.range(0, TAU), this.rng.range(20, 96)), this.rng.pick([CYAN, GREEN, WHITE]), 0.42, this.rng.range(0.9, 2.2), 14);
+    }
+  }
+
+  private updateWorkers(dt: number, screen: ScreenState): void {
     for (const energy of this.energy) {
       energy.claimedBy = undefined;
     }
 
     const infection = this.calculateInfection();
     const workerSpeedMultiplier = this.getWorkerSpeedMultiplier();
+    const lostWorkers = new Set<number>();
     const activeBeacon = this.beacons.reduce<Beacon | undefined>((best, beacon) => {
       if (beacon.life <= 0) return best;
       return !best || beacon.life > best.life ? beacon : best;
@@ -637,6 +695,10 @@ export class Simulation {
       let state: WorkerState = worker.carry > 0 ? "carry" : "search";
 
       const avoidance = this.getVirusAvoidance(worker.pos);
+      if (screen !== "menu" && this.shouldLoseWorker(worker, dt, infection, avoidance.strength)) {
+        lostWorkers.add(worker.id);
+        continue;
+      }
       if (avoidance.strength > 0.1 && worker.carry <= 0) {
         state = "flee";
         desiredSpeed *= 1.18;
@@ -718,6 +780,49 @@ export class Simulation {
         worker.angle = angleOf(sub(worker.pos, previous));
       }
       worker.state = state;
+    }
+
+    if (lostWorkers.size > 0) {
+      this.workers = this.workers.filter((worker) => !lostWorkers.has(worker.id));
+    }
+  }
+
+  private shouldLoseWorker(worker: Worker, dt: number, infection: number, avoidanceStrength: number): boolean {
+    if (this.workerLossCooldown > 0) return false;
+    const capacity = this.getWorkerCapacity();
+    if (this.workers.length <= Math.max(46, Math.floor(capacity * 0.46))) return false;
+
+    for (const virus of this.viruses) {
+      if (virus.hp <= 0) continue;
+      const d = distance(worker.pos, virus.pos);
+      if (d < virus.radius + (virus.elite ? 10 : 7)) {
+        const chance = clamp(dt * (virus.elite ? 1.05 : 0.66), 0, 0.16);
+        if (this.rng.chance(chance)) {
+          this.loseWorker(worker, virus.elite);
+          return true;
+        }
+      }
+    }
+
+    const danger = avoidanceStrength * 0.45 + infection * 0.9;
+    if (danger > 0.7 && this.rng.chance(dt * 0.018 * danger)) {
+      this.loseWorker(worker, false);
+      return true;
+    }
+    return false;
+  }
+
+  private loseWorker(worker: Worker, eliteContact: boolean): void {
+    this.workerLossCooldown = this.rng.range(eliteContact ? 0.9 : 1.25, eliteContact ? 1.45 : 2.1);
+    if (worker.carry > 0 && this.energy.length < MAX_ENERGY && this.rng.chance(worker.carryRare ? 0.75 : 0.45)) {
+      this.spawnEnergy(worker.carryRare, worker.pos);
+    }
+    if (this.workerEventCooldown <= 0) {
+      this.workerEventCooldown = 8.5;
+      this.setEvent("Worker lost", RED, 1.6);
+    }
+    for (let i = 0; i < (eliteContact ? 18 : 11); i += 1) {
+      this.addParticle(worker.pos, fromAngle(this.rng.range(0, TAU), this.rng.range(24, eliteContact ? 135 : 96)), this.rng.pick([CYAN, RED, WHITE]), 0.46, this.rng.range(0.8, 2.2), 15);
     }
   }
 

@@ -392,7 +392,9 @@ export default function App() {
               </div>
               <div className="stat">
                 <span>Workers</span>
-                <strong>{snapshot.workers}</strong>
+                <strong>
+                  {snapshot.workers}/{snapshot.workerCapacity}
+                </strong>
               </div>
               <div className="stat">
                 <span>Nodes</span>
