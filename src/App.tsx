@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { GameAudio } from "./game/audio";
 import { DEFAULT_SEED, FIXED_DT, STORAGE_HIGH_SCORE } from "./game/constants";
 import { canvasPointerToWorld } from "./game/input";
 import { makeSeed } from "./game/random";
@@ -42,7 +43,11 @@ function bonusPercent(value: number): string {
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const audioRef = useRef<GameAudio | null>(null);
   const simulationRef = useRef<Simulation | null>(null);
+  if (!audioRef.current) {
+    audioRef.current = new GameAudio();
+  }
   if (!simulationRef.current) {
     simulationRef.current = new Simulation(DEFAULT_SEED, false);
   }
@@ -52,6 +57,7 @@ export default function App() {
   const [cinematic, setCinematic] = useState(false);
   const [debug, setDebug] = useState(false);
   const [speedMultiplier, setSpeedMultiplier] = useState<(typeof SPEED_MULTIPLIERS)[number]>(1);
+  const [muted, setMuted] = useState(false);
   const [highScore, setHighScore] = useState(readHighScore);
   const [snapshot, setSnapshot] = useState<SimulationSnapshot>(() => simulationRef.current!.getSnapshot());
 
@@ -60,7 +66,9 @@ export default function App() {
   const cinematicRef = useRef(cinematic);
   const debugRef = useRef(debug);
   const speedMultiplierRef = useRef(speedMultiplier);
+  const mutedRef = useRef(muted);
   const highScoreRef = useRef(highScore);
+  const audioSnapshotRef = useRef(snapshot);
 
   useEffect(() => {
     seedRef.current = seed;
@@ -83,6 +91,11 @@ export default function App() {
   }, [speedMultiplier]);
 
   useEffect(() => {
+    mutedRef.current = muted;
+    audioRef.current?.setMuted(muted);
+  }, [muted]);
+
+  useEffect(() => {
     highScoreRef.current = highScore;
   }, [highScore]);
 
@@ -98,16 +111,22 @@ export default function App() {
 
   const startGame = (nextCinematic: boolean) => {
     const sim = simulationRef.current!;
+    void audioRef.current?.resume();
     setCinematicState(nextCinematic);
     sim.reset(seedRef.current, nextCinematic);
-    setSnapshot(sim.getSnapshot());
+    const nextSnapshot = sim.getSnapshot();
+    audioSnapshotRef.current = nextSnapshot;
+    setSnapshot(nextSnapshot);
     setScreenState("playing");
   };
 
   const restartCurrentSeed = () => {
     const sim = simulationRef.current!;
+    void audioRef.current?.resume();
     sim.reset(seedRef.current, cinematicRef.current);
-    setSnapshot(sim.getSnapshot());
+    const nextSnapshot = sim.getSnapshot();
+    audioSnapshotRef.current = nextSnapshot;
+    setSnapshot(nextSnapshot);
     setScreenState("playing");
   };
 
@@ -117,7 +136,9 @@ export default function App() {
     seedRef.current = nextSeed;
     setSeed(nextSeed);
     sim.reset(nextSeed, cinematicRef.current);
-    setSnapshot(sim.getSnapshot());
+    const nextSnapshot = sim.getSnapshot();
+    audioSnapshotRef.current = nextSnapshot;
+    setSnapshot(nextSnapshot);
     if (screenRef.current !== "menu") {
       setScreenState("playing");
     }
@@ -135,6 +156,15 @@ export default function App() {
     });
   };
 
+  const toggleMute = () => {
+    setMuted((current) => {
+      const next = !current;
+      audioRef.current?.setMuted(next);
+      if (!next && screenRef.current !== "menu") void audioRef.current?.resume();
+      return next;
+    });
+  };
+
   const toggleCinematic = () => {
     const next = !cinematicRef.current;
     setCinematicState(next);
@@ -148,6 +178,7 @@ export default function App() {
 
   const triggerShockwave = () => {
     if (screenRef.current !== "playing") return;
+    void audioRef.current?.resume();
     simulationRef.current?.triggerShockwave(false);
   };
 
@@ -172,6 +203,8 @@ export default function App() {
         toggleCinematic();
       } else if (key === "f") {
         cycleSpeed();
+      } else if (key === "m") {
+        toggleMute();
       } else if (key === "d") {
         setDebug((value) => !value);
       } else if (key === "1") {
@@ -265,6 +298,8 @@ export default function App() {
       if (now - lastSnapshot > 120) {
         lastSnapshot = now;
         const nextSnapshot = sim.getSnapshot();
+        playSnapshotAudio(audioSnapshotRef.current, nextSnapshot);
+        audioSnapshotRef.current = nextSnapshot;
         setSnapshot(nextSnapshot);
         if (
           screenRef.current !== "menu" &&
@@ -290,6 +325,7 @@ export default function App() {
 
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (screenRef.current !== "playing" && screenRef.current !== "cinematicAutoRestart") return;
+    void audioRef.current?.resume();
     const canvas = canvasRef.current;
     if (!canvas) return;
     const pos = canvasPointerToWorld(canvas, event.clientX, event.clientY);
@@ -299,6 +335,18 @@ export default function App() {
   const hudVisible = !cinematic && screen !== "menu";
   const overlayVisible = screen === "menu" || screen === "paused" || screen === "coreDestroyed";
   const upgradeViews = simulationRef.current?.getUpgradeViews() ?? [];
+
+  const playSnapshotAudio = (previous: SimulationSnapshot, next: SimulationSnapshot) => {
+    if (screenRef.current === "menu") return;
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (next.wave > previous.wave) audio.wave();
+    if (next.shocksUsed > previous.shocksUsed) audio.shock();
+    if (next.upgradesPurchased > previous.upgradesPurchased) audio.upgrade();
+    if (next.energyCollected > previous.energyCollected + 0.5) audio.energy();
+    if (next.shotsFired > previous.shotsFired) audio.laser();
+    if (next.coreHealth < previous.coreHealth - 0.35) audio.damage();
+  };
 
   return (
     <div className={`app ${cinematic ? "is-cinematic" : ""} state-${screen}`}>
@@ -391,6 +439,17 @@ export default function App() {
             </div>
           )}
 
+          {cinematic && screen !== "menu" && (
+            <div className="cinematic-tools">
+              <button type="button" onClick={toggleMute}>
+                {muted ? "Unmute" : "Mute"}
+              </button>
+              <button type="button" onClick={cycleSpeed}>
+                {speedMultiplier}x
+              </button>
+            </div>
+          )}
+
           {debug && (
             <div className="debug-panel">
               <span>{snapshot.seed}</span>
@@ -422,6 +481,9 @@ export default function App() {
                     </button>
                     <button type="button" onClick={randomizeSeed}>
                       New Seed
+                    </button>
+                    <button type="button" onClick={toggleMute}>
+                      {muted ? "Unmute" : "Mute"}
                     </button>
                   </div>
                 </section>
@@ -470,6 +532,9 @@ export default function App() {
             </button>
             <button type="button" onClick={cycleSpeed}>
               Speed {speedMultiplier}x
+            </button>
+            <button type="button" onClick={toggleMute}>
+              {muted ? "Unmute" : "Mute"}
             </button>
             <button type="button" onClick={togglePause} disabled={screen === "menu" || screen === "coreDestroyed"}>
               {screen === "paused" ? "Resume" : "Pause"}

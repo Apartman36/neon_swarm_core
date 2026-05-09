@@ -249,6 +249,35 @@ button {
   white-space: nowrap;
 }
 
+.cinematic-tools {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: 10px;
+  z-index: 5;
+  display: flex;
+  gap: 6px;
+  opacity: 0.34;
+  transition: opacity 140ms ease;
+}
+
+.cinematic-tools:hover {
+  opacity: 0.82;
+}
+
+.cinematic-tools button {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid rgba(142, 239, 255, 0.22);
+  border-radius: 7px;
+  background: rgba(2, 7, 14, 0.46);
+  color: rgba(238, 253, 255, 0.78);
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  backdrop-filter: blur(10px);
+}
+
 .debug-panel {
   position: absolute;
   right: 12px;
@@ -407,13 +436,14 @@ h2 {
 
 .controls {
   display: flex;
+  flex-wrap: wrap;
   width: min(96vw, 540px, calc(88svh * 9 / 16));
   gap: 7px;
   justify-content: center;
 }
 
 .controls button {
-  flex: 1 1 0;
+  flex: 1 1 72px;
   min-width: 0;
   padding: 0 8px;
 }
