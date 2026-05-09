@@ -391,7 +391,7 @@ export default function App() {
                 <strong>{percent(snapshot.infection)}</strong>
               </div>
               <div className="stat">
-                <span>Colony</span>
+                <span>Workers</span>
                 <strong>{snapshot.workers}</strong>
               </div>
               <div className="stat">
@@ -419,9 +419,8 @@ export default function App() {
                     type="button"
                     onClick={() => purchaseUpgrade(upgrade.id)}
                     disabled={!upgrade.canBuy || screen !== "playing"}
-                    title={upgrade.description}
+                    title={`${upgrade.description} Shortcut ${upgrade.shortcut}.`}
                   >
-                    <span className="upgrade-key">{upgrade.shortcut}</span>
                     <span className="upgrade-name">{upgrade.shortLabel}</span>
                     <span className="upgrade-level">Lv {upgrade.level}</span>
                     <span className="upgrade-cost">{upgrade.maxed ? "Max" : `${upgrade.cost} pt`}</span>

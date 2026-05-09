@@ -3,6 +3,7 @@ import {
   CORE_POSITION,
   CORE_RADIUS,
   DEFAULT_SEED,
+  GAMEPLAY_BOUNDS,
   INITIAL_WORKERS,
   MAX_BEAMS,
   MAX_ENERGY,
@@ -393,10 +394,7 @@ export class Simulation {
   }
 
   addBeacon(pos: Vec2): void {
-    const clamped = {
-      x: clamp(pos.x, 38, WORLD_WIDTH - 38),
-      y: clamp(pos.y, 52, WORLD_HEIGHT - 52),
-    };
+    const clamped = this.clampToGameplay(pos, 0);
     this.beacons.push({
       id: this.id(),
       pos: clamped,
@@ -536,12 +534,12 @@ export class Simulation {
   private createWorker(): Worker {
     const angle = this.rng.range(0, TAU);
     const radius = this.rng.range(26, 180);
-    const pos = add(CORE_POSITION, fromAngle(angle, radius));
+    const pos = this.clampToGameplay(add(CORE_POSITION, fromAngle(angle, radius)), 0);
     return {
       id: this.id(),
       pos: {
-        x: clamp(pos.x, 28, WORLD_WIDTH - 28),
-        y: clamp(pos.y, 50, WORLD_HEIGHT - 50),
+        x: pos.x,
+        y: pos.y,
       },
       vel: fromAngle(angle + Math.PI / 2, this.rng.range(12, 44)),
       angle,
@@ -572,10 +570,7 @@ export class Simulation {
       const angle = this.rng.range(0, TAU);
       const radius = this.rng.range(175, 640);
       const pos = add(CORE_POSITION, fromAngle(angle, radius));
-      const clamped = {
-        x: clamp(pos.x, 54, WORLD_WIDTH - 54),
-        y: clamp(pos.y, 82, WORLD_HEIGHT - 82),
-      };
+      const clamped = this.clampToGameplay(pos, 0);
       const inSafeCenter =
         clamped.x > SAFE_AREA.x &&
         clamped.x < SAFE_AREA.x + SAFE_AREA.width &&
@@ -584,8 +579,8 @@ export class Simulation {
       if (!inSafeCenter || this.rng.chance(0.18)) return clamped;
     }
     return {
-      x: this.rng.range(60, WORLD_WIDTH - 60),
-      y: this.rng.range(600, WORLD_HEIGHT - 90),
+      x: this.rng.range(GAMEPLAY_BOUNDS.minX + 6, GAMEPLAY_BOUNDS.maxX - 6),
+      y: this.rng.range(Math.max(600, GAMEPLAY_BOUNDS.minY), GAMEPLAY_BOUNDS.maxY - 16),
     };
   }
 
@@ -1135,16 +1130,13 @@ export class Simulation {
       const ring = rings[Math.min(rings.length - 1, Math.floor(this.nodes.length / 3))];
       const angle = -Math.PI / 2 + this.nodes.length * 2.399 + this.rng.range(-0.75, 0.75) + attempt * 0.19;
       const pos = add(this.core.pos, fromAngle(angle, ring + this.rng.range(-38, 42)));
-      const clamped = {
-        x: clamp(pos.x, 70, WORLD_WIDTH - 70),
-        y: clamp(pos.y, 575, WORLD_HEIGHT - 105),
-      };
+      const clamped = this.clampToGameplay(pos, 16);
       const tooClose = this.nodes.some((node) => distance(node.pos, clamped) < 112);
       if (!tooClose) return clamped;
     }
     return {
-      x: this.rng.range(100, WORLD_WIDTH - 100),
-      y: this.rng.range(640, WORLD_HEIGHT - 140),
+      x: this.rng.range(GAMEPLAY_BOUNDS.minX + 46, GAMEPLAY_BOUNDS.maxX - 46),
+      y: this.rng.range(640, GAMEPLAY_BOUNDS.maxY - 35),
     };
   }
 
@@ -1198,10 +1190,13 @@ export class Simulation {
 
   private spawnEnergyBloom(rare: boolean): void {
     const angle = this.rng.range(0, TAU);
-    const center = {
-      x: clamp(this.core.pos.x + Math.cos(angle) * this.rng.range(180, 420), 90, WORLD_WIDTH - 90),
-      y: clamp(this.core.pos.y + Math.sin(angle) * this.rng.range(180, 470), 610, WORLD_HEIGHT - 120),
-    };
+    const center = this.clampToGameplay(
+      {
+        x: this.core.pos.x + Math.cos(angle) * this.rng.range(180, 420),
+        y: this.core.pos.y + Math.sin(angle) * this.rng.range(180, 470),
+      },
+      36,
+    );
     const count = rare ? 18 : 13;
     for (let i = 0; i < count; i += 1) {
       this.spawnEnergy(rare && i % 3 === 0, add(center, fromAngle(this.rng.range(0, TAU), this.rng.range(12, rare ? 108 : 78))));
@@ -1402,20 +1397,31 @@ export class Simulation {
   }
 
   private constrainAgent(pos: Vec2, vel: Vec2, padding: number): void {
-    if (pos.x < padding) {
-      pos.x = padding;
+    const minX = GAMEPLAY_BOUNDS.minX - 30 + padding;
+    const maxX = GAMEPLAY_BOUNDS.maxX + 30 - padding;
+    const minY = GAMEPLAY_BOUNDS.minY - 48 + padding;
+    const maxY = GAMEPLAY_BOUNDS.maxY - padding;
+    if (pos.x < minX) {
+      pos.x = minX;
       vel.x = Math.abs(vel.x) * 0.45;
-    } else if (pos.x > WORLD_WIDTH - padding) {
-      pos.x = WORLD_WIDTH - padding;
+    } else if (pos.x > maxX) {
+      pos.x = maxX;
       vel.x = -Math.abs(vel.x) * 0.45;
     }
-    if (pos.y < padding) {
-      pos.y = padding;
+    if (pos.y < minY) {
+      pos.y = minY;
       vel.y = Math.abs(vel.y) * 0.45;
-    } else if (pos.y > WORLD_HEIGHT - padding) {
-      pos.y = WORLD_HEIGHT - padding;
+    } else if (pos.y > maxY) {
+      pos.y = maxY;
       vel.y = -Math.abs(vel.y) * 0.45;
     }
+  }
+
+  private clampToGameplay(pos: Vec2, padding: number): Vec2 {
+    return {
+      x: clamp(pos.x, GAMEPLAY_BOUNDS.minX + padding, GAMEPLAY_BOUNDS.maxX - padding),
+      y: clamp(pos.y, GAMEPLAY_BOUNDS.minY + padding, GAMEPLAY_BOUNDS.maxY - padding),
+    };
   }
 
   private cleanup(): void {

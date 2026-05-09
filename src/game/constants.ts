@@ -10,6 +10,12 @@ export const SAFE_AREA = {
   width: WORLD_WIDTH - 320,
   height: 360,
 };
+export const GAMEPLAY_BOUNDS = {
+  minX: 54,
+  maxX: WORLD_WIDTH - 54,
+  minY: 330,
+  maxY: WORLD_HEIGHT - 225,
+};
 
 export const INITIAL_WORKERS = 118;
 export const CINEMATIC_WORKERS = 138;

@@ -87,6 +87,7 @@ button {
 
 .hud-bottom {
   bottom: max(10px, env(safe-area-inset-bottom));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .stat {
@@ -174,7 +175,7 @@ button {
 
 .upgrade-list button {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 5px;
   min-height: 32px;
@@ -197,17 +198,6 @@ button {
 .upgrade-list button:disabled {
   cursor: not-allowed;
   opacity: 0.46;
-}
-
-.upgrade-key {
-  display: grid;
-  width: 18px;
-  height: 18px;
-  place-items: center;
-  border: 1px solid rgba(116, 246, 255, 0.25);
-  border-radius: 5px;
-  color: #74f6ff;
-  font-size: 10px;
 }
 
 .upgrade-name,
@@ -545,7 +535,7 @@ h2 {
   }
 
   .upgrade-list button {
-    grid-template-columns: 16px minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto;
     min-height: 30px;
     padding: 0 5px;
     font-size: 9px;

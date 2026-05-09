@@ -1,4 +1,4 @@
-import { CORE_RADIUS, SAFE_AREA, WORLD_HEIGHT, WORLD_WIDTH } from "./constants";
+import { CORE_RADIUS, GAMEPLAY_BOUNDS, SAFE_AREA, WORLD_HEIGHT, WORLD_WIDTH } from "./constants";
 import { TAU, clamp, distance, fromAngle, pointAlongPolyline, wrap01 } from "./math";
 import type { Simulation } from "./simulation";
 import type { CircuitLine, RenderOptions, Vec2 } from "./types";
@@ -494,7 +494,7 @@ function drawEventLabel(ctx: CanvasRenderingContext2D, sim: Simulation, options:
   ctx.shadowColor = sim.eventLabel.color;
   ctx.shadowBlur = 16;
   ctx.fillStyle = colorWithAlpha(sim.eventLabel.color, 0.82 * alpha);
-  ctx.fillText(sim.eventLabel.text.toUpperCase(), WORLD_WIDTH / 2, options.cinematic ? 96 : 112);
+  ctx.fillText(sim.eventLabel.text.toUpperCase(), WORLD_WIDTH / 2, options.cinematic ? 96 : GAMEPLAY_BOUNDS.minY - 42);
   ctx.restore();
 }
 
