@@ -1,0 +1,418 @@
+import { useEffect, useRef, useState } from "react";
+import { DEFAULT_SEED, FIXED_DT, STORAGE_HIGH_SCORE } from "./game/constants";
+import { canvasPointerToWorld } from "./game/input";
+import { makeSeed } from "./game/random";
+import { renderSimulation } from "./game/render";
+import { Simulation } from "./game/simulation";
+import type { ScreenState, SimulationSnapshot } from "./game/types";
+
+function readHighScore(): number {
+  try {
+    const value = localStorage.getItem(STORAGE_HIGH_SCORE);
+    return value ? Number.parseFloat(value) || 0 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeHighScore(value: number): void {
+  try {
+    localStorage.setItem(STORAGE_HIGH_SCORE, value.toFixed(2));
+  } catch {
+    // Local storage can be blocked in private browser contexts.
+  }
+}
+
+function formatTime(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(total / 60);
+  const secs = total % 60;
+  return `${minutes}:${secs.toString().padStart(2, "0")}`;
+}
+
+function percent(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
+
+export default function App() {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const simulationRef = useRef<Simulation | null>(null);
+  if (!simulationRef.current) {
+    simulationRef.current = new Simulation(DEFAULT_SEED, false);
+  }
+
+  const [seed, setSeed] = useState(DEFAULT_SEED);
+  const [screen, setScreen] = useState<ScreenState>("menu");
+  const [cinematic, setCinematic] = useState(false);
+  const [debug, setDebug] = useState(false);
+  const [highScore, setHighScore] = useState(readHighScore);
+  const [snapshot, setSnapshot] = useState<SimulationSnapshot>(() => simulationRef.current!.getSnapshot());
+
+  const seedRef = useRef(seed);
+  const screenRef = useRef(screen);
+  const cinematicRef = useRef(cinematic);
+  const debugRef = useRef(debug);
+  const highScoreRef = useRef(highScore);
+
+  useEffect(() => {
+    seedRef.current = seed;
+  }, [seed]);
+
+  useEffect(() => {
+    screenRef.current = screen;
+  }, [screen]);
+
+  useEffect(() => {
+    cinematicRef.current = cinematic;
+  }, [cinematic]);
+
+  useEffect(() => {
+    debugRef.current = debug;
+  }, [debug]);
+
+  useEffect(() => {
+    highScoreRef.current = highScore;
+  }, [highScore]);
+
+  const setScreenState = (next: ScreenState) => {
+    screenRef.current = next;
+    setScreen(next);
+  };
+
+  const setCinematicState = (next: boolean) => {
+    cinematicRef.current = next;
+    setCinematic(next);
+  };
+
+  const startGame = (nextCinematic: boolean) => {
+    const sim = simulationRef.current!;
+    setCinematicState(nextCinematic);
+    sim.reset(seedRef.current, nextCinematic);
+    setSnapshot(sim.getSnapshot());
+    setScreenState("playing");
+  };
+
+  const restartCurrentSeed = () => {
+    const sim = simulationRef.current!;
+    sim.reset(seedRef.current, cinematicRef.current);
+    setSnapshot(sim.getSnapshot());
+    setScreenState("playing");
+  };
+
+  const randomizeSeed = () => {
+    const nextSeed = makeSeed();
+    const sim = simulationRef.current!;
+    seedRef.current = nextSeed;
+    setSeed(nextSeed);
+    sim.reset(nextSeed, cinematicRef.current);
+    setSnapshot(sim.getSnapshot());
+    if (screenRef.current !== "menu") {
+      setScreenState("playing");
+    }
+  };
+
+  const togglePause = () => {
+    if (screenRef.current === "playing") setScreenState("paused");
+    else if (screenRef.current === "paused") setScreenState("playing");
+  };
+
+  const toggleCinematic = () => {
+    const next = !cinematicRef.current;
+    setCinematicState(next);
+    if (screenRef.current === "menu" || screenRef.current === "coreDestroyed") {
+      const sim = simulationRef.current!;
+      sim.reset(seedRef.current, next);
+      setSnapshot(sim.getSnapshot());
+      setScreenState("playing");
+    }
+  };
+
+  const triggerShockwave = () => {
+    if (screenRef.current !== "playing") return;
+    simulationRef.current?.triggerShockwave(false);
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase();
+      if (key === " " || key === "spacebar") {
+        event.preventDefault();
+        triggerShockwave();
+      } else if (key === "r") {
+        restartCurrentSeed();
+      } else if (key === "n") {
+        randomizeSeed();
+      } else if (key === "c") {
+        toggleCinematic();
+      } else if (key === "d") {
+        setDebug((value) => !value);
+      } else if (key === "p" || key === "escape") {
+        togglePause();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const sim = simulationRef.current;
+    if (!canvas || !sim) return;
+    const ctx = canvas.getContext("2d", { alpha: false });
+    if (!ctx) return;
+
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect();
+      const dpr = Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
+      const width = Math.max(1, Math.round(rect.width * dpr));
+      const height = Math.max(1, Math.round(rect.height * dpr));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+    };
+
+    resize();
+    const observer = new ResizeObserver(resize);
+    observer.observe(canvas);
+    window.addEventListener("resize", resize);
+
+    let raf = 0;
+    let last = performance.now();
+    let accumulator = 0;
+    let lastSnapshot = 0;
+
+    const frame = (now: number) => {
+      const frameDt = Math.min(0.05, Math.max(0, (now - last) / 1000));
+      last = now;
+
+      if (screenRef.current !== "paused") {
+        accumulator += frameDt;
+        let steps = 0;
+        while (accumulator >= FIXED_DT && steps < 5) {
+          sim.update(FIXED_DT, {
+            cinematic: cinematicRef.current,
+            screen: screenRef.current,
+          });
+          accumulator -= FIXED_DT;
+          steps += 1;
+        }
+        if (steps >= 5) accumulator = 0;
+      }
+
+      if (sim.destroyed) {
+        if (cinematicRef.current) {
+          if (screenRef.current !== "cinematicAutoRestart") {
+            setScreenState("cinematicAutoRestart");
+          }
+          if (sim.core.collapseTimer > 3.25) {
+            const nextSeed = makeSeed();
+            seedRef.current = nextSeed;
+            setSeed(nextSeed);
+            sim.reset(nextSeed, true);
+            setScreenState("playing");
+          }
+        } else if (screenRef.current === "playing") {
+          setScreenState("coreDestroyed");
+        }
+      }
+
+      renderSimulation(ctx, sim, {
+        screen: screenRef.current,
+        cinematic: cinematicRef.current,
+        debug: debugRef.current,
+        highScore: highScoreRef.current,
+      });
+
+      if (now - lastSnapshot > 120) {
+        lastSnapshot = now;
+        const nextSnapshot = sim.getSnapshot();
+        setSnapshot(nextSnapshot);
+        if (
+          screenRef.current !== "menu" &&
+          nextSnapshot.time > highScoreRef.current &&
+          !Number.isNaN(nextSnapshot.time)
+        ) {
+          highScoreRef.current = nextSnapshot.time;
+          setHighScore(nextSnapshot.time);
+          writeHighScore(nextSnapshot.time);
+        }
+      }
+
+      raf = requestAnimationFrame(frame);
+    };
+
+    raf = requestAnimationFrame(frame);
+    return () => {
+      cancelAnimationFrame(raf);
+      observer.disconnect();
+      window.removeEventListener("resize", resize);
+    };
+  }, []);
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (screenRef.current !== "playing" && screenRef.current !== "cinematicAutoRestart") return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const pos = canvasPointerToWorld(canvas, event.clientX, event.clientY);
+    simulationRef.current?.addBeacon(pos);
+  };
+
+  const hudVisible = !cinematic && screen !== "menu";
+  const overlayVisible = screen === "menu" || screen === "paused" || screen === "coreDestroyed";
+
+  return (
+    <div className={`app ${cinematic ? "is-cinematic" : ""} state-${screen}`}>
+      <main className="game-shell">
+        <div className="frame-wrap">
+          <canvas
+            ref={canvasRef}
+            className="game-canvas"
+            aria-label="Neon Swarm Core simulation"
+            onPointerDown={handlePointerDown}
+          />
+
+          {hudVisible && (
+            <div className="hud hud-top">
+              <div className="stat">
+                <span>Time</span>
+                <strong>{formatTime(snapshot.time)}</strong>
+              </div>
+              <div className="stat">
+                <span>Core</span>
+                <strong>{percent(snapshot.coreHealth / 100)}</strong>
+              </div>
+              <div className="stat">
+                <span>Energy</span>
+                <strong>{Math.round(snapshot.coreEnergy)}</strong>
+              </div>
+              <div className="stat">
+                <span>Infection</span>
+                <strong>{percent(snapshot.infection)}</strong>
+              </div>
+            </div>
+          )}
+
+          {hudVisible && (
+            <div className="hud hud-bottom">
+              <div className="stat">
+                <span>Colony</span>
+                <strong>{snapshot.workers}</strong>
+              </div>
+              <div className="stat">
+                <span>Nodes</span>
+                <strong>{snapshot.nodes}</strong>
+              </div>
+              <div className="stat">
+                <span>Shock</span>
+                <strong>{percent(snapshot.shockCharge)}</strong>
+              </div>
+              <div className="stat">
+                <span>Best</span>
+                <strong>{formatTime(highScore)}</strong>
+              </div>
+            </div>
+          )}
+
+          {cinematic && screen !== "menu" && (
+            <div className="cinematic-status">
+              <span>{formatTime(snapshot.time)}</span>
+              {snapshot.eventText && <strong>{snapshot.eventText}</strong>}
+            </div>
+          )}
+
+          {debug && (
+            <div className="debug-panel">
+              <span>{snapshot.seed}</span>
+              <span>virus {snapshot.viruses}</span>
+              <span>infection {percent(snapshot.infection)}</span>
+              <span>mode {cinematic ? "cinematic" : "normal"}</span>
+            </div>
+          )}
+
+          {overlayVisible && (
+            <div className={`overlay overlay-${screen}`}>
+              {screen === "menu" && (
+                <section className="menu-panel">
+                  <p className="eyebrow">Synthetic colony defense</p>
+                  <h1>Neon Swarm Core</h1>
+                  <div className="seed-row">
+                    <span>Seed</span>
+                    <strong>{seed}</strong>
+                  </div>
+                  <div className="menu-actions">
+                    <button type="button" className="primary" onClick={() => startGame(false)}>
+                      Start
+                    </button>
+                    <button type="button" onClick={() => startGame(true)}>
+                      Cinematic
+                    </button>
+                    <button type="button" onClick={randomizeSeed}>
+                      New Seed
+                    </button>
+                  </div>
+                </section>
+              )}
+
+              {screen === "paused" && (
+                <section className="dialog-panel">
+                  <p className="eyebrow">Simulation paused</p>
+                  <h2>{formatTime(snapshot.time)}</h2>
+                  <div className="menu-actions">
+                    <button type="button" className="primary" onClick={togglePause}>
+                      Resume
+                    </button>
+                    <button type="button" onClick={restartCurrentSeed}>
+                      Restart
+                    </button>
+                  </div>
+                </section>
+              )}
+
+              {screen === "coreDestroyed" && (
+                <section className="dialog-panel danger">
+                  <p className="eyebrow">Core collapsed</p>
+                  <h2>{formatTime(snapshot.time)}</h2>
+                  <div className="menu-actions">
+                    <button type="button" className="primary" onClick={restartCurrentSeed}>
+                      Restart
+                    </button>
+                    <button type="button" onClick={randomizeSeed}>
+                      New Seed
+                    </button>
+                    <button type="button" onClick={() => startGame(true)}>
+                      Cinematic
+                    </button>
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
+        </div>
+
+        {!cinematic && (
+          <nav className="controls" aria-label="Simulation controls">
+            <button type="button" onClick={triggerShockwave} disabled={snapshot.shockCharge < 1 || screen !== "playing"}>
+              Shock
+            </button>
+            <button type="button" onClick={togglePause} disabled={screen === "menu" || screen === "coreDestroyed"}>
+              {screen === "paused" ? "Resume" : "Pause"}
+            </button>
+            <button type="button" onClick={restartCurrentSeed}>
+              Restart
+            </button>
+            <button type="button" onClick={randomizeSeed}>
+              Seed
+            </button>
+            <button type="button" onClick={toggleCinematic}>
+              Cinema
+            </button>
+            <button type="button" onClick={() => setDebug((value) => !value)}>
+              Debug
+            </button>
+          </nav>
+        )}
+      </main>
+    </div>
+  );
+}
