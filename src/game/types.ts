@@ -5,6 +5,25 @@ export interface Vec2 {
 
 export type WorkerState = "search" | "carry" | "repair" | "flee" | "beacon";
 export type ScreenState = "menu" | "playing" | "paused" | "coreDestroyed" | "cinematicAutoRestart";
+export type UpgradeId = "swarmSpeed" | "nodeFireRate" | "coreShield" | "repairPower";
+
+export type UpgradeLevels = Record<UpgradeId, number>;
+
+export interface UpgradeDefinition {
+  id: UpgradeId;
+  label: string;
+  shortLabel: string;
+  description: string;
+  shortcut: string;
+  maxLevel: number;
+}
+
+export interface UpgradeView extends UpgradeDefinition {
+  level: number;
+  cost: number;
+  canBuy: boolean;
+  maxed: boolean;
+}
 
 export interface TrailPoint extends Vec2 {
   life: number;
@@ -146,10 +165,20 @@ export interface SimulationSnapshot {
   coreHealth: number;
   coreEnergy: number;
   shockCharge: number;
+  shockPowerBonus: number;
+  upgradePoints: number;
+  upgrades: UpgradeLevels;
+  upgradesPurchased: number;
   workers: number;
   infection: number;
+  maxInfection: number;
   nodes: number;
+  nodesBuilt: number;
   viruses: number;
+  wave: number;
+  energyCollected: number;
+  shocksUsed: number;
+  shotsFired: number;
   eventText: string;
   destroyed: boolean;
   cinematic: boolean;

@@ -47,6 +47,10 @@ import type {
   ScreenState,
   Shockwave,
   SimulationSnapshot,
+  UpgradeDefinition,
+  UpgradeId,
+  UpgradeLevels,
+  UpgradeView,
   Vec2,
   Virus,
   Worker,
@@ -64,6 +68,52 @@ const GOLD = "#ffe27a";
 const MAGENTA = "#ff3df2";
 const RED = "#ff315f";
 const WHITE = "#f5fbff";
+
+const UPGRADE_MAX_LEVEL = 8;
+
+export const UPGRADE_DEFINITIONS: UpgradeDefinition[] = [
+  {
+    id: "swarmSpeed",
+    label: "Swarm Speed",
+    shortLabel: "Speed",
+    description: "Workers move faster and deliver slightly more energy.",
+    shortcut: "1",
+    maxLevel: UPGRADE_MAX_LEVEL,
+  },
+  {
+    id: "nodeFireRate",
+    label: "Node Fire Rate",
+    shortLabel: "Fire",
+    description: "Defense nodes shoot more frequently.",
+    shortcut: "2",
+    maxLevel: UPGRADE_MAX_LEVEL,
+  },
+  {
+    id: "coreShield",
+    label: "Core Shield",
+    shortLabel: "Shield",
+    description: "Core damage and infection pressure are reduced.",
+    shortcut: "3",
+    maxLevel: UPGRADE_MAX_LEVEL,
+  },
+  {
+    id: "repairPower",
+    label: "Repair Power",
+    shortLabel: "Repair",
+    description: "Workers clean infected nodes and lines faster.",
+    shortcut: "4",
+    maxLevel: UPGRADE_MAX_LEVEL,
+  },
+];
+
+function createUpgradeLevels(): UpgradeLevels {
+  return {
+    swarmSpeed: 0,
+    nodeFireRate: 0,
+    coreShield: 0,
+    repairPower: 0,
+  };
+}
 
 export class Simulation {
   seed = DEFAULT_SEED;
@@ -84,9 +134,21 @@ export class Simulation {
   beacons: Beacon[] = [];
   traces: BackgroundTrace[] = [];
   eventLabel: EventLabel = { text: "", life: 0, maxLife: 1, color: WHITE };
+  upgradePoints = 0;
+  upgradeLevels: UpgradeLevels = createUpgradeLevels();
+  upgradesPurchased = 0;
+  shockPowerBonus = 0;
+  wave = 0;
+  maxInfection = 0;
+  nodesBuilt = 0;
+  energyCollected = 0;
+  shocksUsed = 0;
+  shotsFired = 0;
 
   private nextId = 1;
   private energySpawnTimer = 0;
+  private upgradePointTimer = 0;
+  private cinematicUpgradeTimer = 2.5;
   private directorTimer = 2.4;
   private nodeBuildCooldown = 4.5;
   private nodeUpgradeCooldown = 8;
@@ -94,6 +156,7 @@ export class Simulation {
   private introBloomSpawned = false;
   private overdriveTimer = 0;
   private menuPulseTimer = 0;
+  private repairEventCooldown = 0;
 
   constructor(seed = DEFAULT_SEED, cinematic = false) {
     this.reset(seed, cinematic);
@@ -118,8 +181,20 @@ export class Simulation {
     this.shockwaves = [];
     this.beacons = [];
     this.traces = this.createBackgroundTraces();
+    this.upgradePoints = 0;
+    this.upgradeLevels = createUpgradeLevels();
+    this.upgradesPurchased = 0;
+    this.shockPowerBonus = 0;
+    this.wave = 0;
+    this.maxInfection = 0;
+    this.nodesBuilt = 0;
+    this.energyCollected = 0;
+    this.shocksUsed = 0;
+    this.shotsFired = 0;
     this.eventLabel = { text: cinematic ? "Cinematic colony online" : "Colony core online", life: 2.8, maxLife: 2.8, color: CYAN };
     this.energySpawnTimer = 0.2;
+    this.upgradePointTimer = 0;
+    this.cinematicUpgradeTimer = 2.5;
     this.directorTimer = cinematic ? 2.8 : 3.4;
     this.nodeBuildCooldown = 5.2;
     this.nodeUpgradeCooldown = 8.5;
@@ -127,6 +202,7 @@ export class Simulation {
     this.introBloomSpawned = false;
     this.overdriveTimer = 0;
     this.menuPulseTimer = 0;
+    this.repairEventCooldown = 0;
 
     const workerCount = clamp(cinematic ? CINEMATIC_WORKERS : INITIAL_WORKERS, 80, MAX_WORKERS);
     for (let i = 0; i < workerCount; i += 1) {
@@ -171,16 +247,20 @@ export class Simulation {
     this.core.pulse = Math.max(0, this.core.pulse - dt * 1.8);
     this.core.damageFlash = Math.max(0, this.core.damageFlash - dt * 2.4);
     this.eventLabel.life = Math.max(0, this.eventLabel.life - dt);
+    this.repairEventCooldown = Math.max(0, this.repairEventCooldown - dt);
 
+    this.updateUpgradePoints(dt, options.screen);
     this.updateAmbientEnergy(dt, options.screen);
     this.updateWorkers(dt);
     this.updateNodes(dt);
     this.updateViruses(dt, options.screen);
     this.updateInfection(dt);
+    this.maxInfection = Math.max(this.maxInfection, this.calculateInfection());
     this.updateCore(dt, options.screen);
     this.updateParticles(dt);
     this.updateDirector(dt, options.screen);
     this.autoBuildAndUpgrade(dt, options.screen);
+    this.autoSpendCinematicUpgrades(dt, options.screen);
     this.cleanup();
   }
 
@@ -191,14 +271,121 @@ export class Simulation {
       coreHealth: this.core.health,
       coreEnergy: this.core.energy,
       shockCharge: this.core.shockCharge,
+      shockPowerBonus: this.shockPowerBonus,
+      upgradePoints: this.upgradePoints,
+      upgrades: { ...this.upgradeLevels },
+      upgradesPurchased: this.upgradesPurchased,
       workers: this.workers.length,
       infection: this.calculateInfection(),
+      maxInfection: this.maxInfection,
       nodes: this.nodes.filter((node) => node.buildProgress >= 1).length,
+      nodesBuilt: this.nodesBuilt,
       viruses: this.viruses.filter((virus) => virus.hp > 0).length,
+      wave: this.wave,
+      energyCollected: this.energyCollected,
+      shocksUsed: this.shocksUsed,
+      shotsFired: this.shotsFired,
       eventText: this.eventLabel.life > 0 ? this.eventLabel.text : "",
       destroyed: this.destroyed,
       cinematic: this.cinematic,
     };
+  }
+
+  getUpgradeViews(): UpgradeView[] {
+    return UPGRADE_DEFINITIONS.map((upgrade) => {
+      const level = this.upgradeLevels[upgrade.id];
+      const maxed = level >= upgrade.maxLevel;
+      const cost = maxed ? Number.POSITIVE_INFINITY : this.getUpgradeCost(upgrade.id);
+      return {
+        ...upgrade,
+        level,
+        cost,
+        canBuy: !maxed && this.upgradePoints >= cost,
+        maxed,
+      };
+    });
+  }
+
+  getUpgradeCost(id: UpgradeId): number {
+    const level = this.upgradeLevels[id];
+    const maxLevel = UPGRADE_DEFINITIONS.find((upgrade) => upgrade.id === id)?.maxLevel ?? UPGRADE_MAX_LEVEL;
+    return level >= maxLevel ? Number.POSITIVE_INFINITY : 1 + level;
+  }
+
+  buyUpgrade(id: UpgradeId): boolean {
+    const definition = UPGRADE_DEFINITIONS.find((upgrade) => upgrade.id === id);
+    if (!definition) return false;
+    const level = this.upgradeLevels[id];
+    if (level >= definition.maxLevel) return false;
+    const cost = this.getUpgradeCost(id);
+    if (this.upgradePoints < cost) return false;
+
+    this.upgradePoints -= cost;
+    this.upgradeLevels[id] = level + 1;
+    this.upgradesPurchased += 1;
+    this.core.pulse = Math.max(this.core.pulse, 0.8);
+
+    if (id === "nodeFireRate") {
+      for (const node of this.nodes) node.overdrive = Math.max(node.overdrive, 0.72);
+    }
+    if (id === "coreShield") {
+      this.core.health = clamp(this.core.health + 3.5, 0, this.core.maxHealth);
+    }
+
+    this.setEvent(`${definition.shortLabel} upgraded`, CYAN, 1.8);
+    this.addShockwave(this.core.pos, 150 + this.upgradesPurchased * 2, 0.72, CYAN);
+    for (let i = 0; i < 22; i += 1) {
+      this.addParticle(this.core.pos, fromAngle(this.rng.range(0, TAU), this.rng.range(28, 118)), this.rng.pick([CYAN, GREEN, WHITE]), 0.48, this.rng.range(1, 2.5), 18);
+    }
+    return true;
+  }
+
+  private updateUpgradePoints(dt: number, screen: ScreenState): void {
+    if (screen === "menu") return;
+    this.upgradePointTimer += dt;
+    while (this.upgradePointTimer >= 5) {
+      this.upgradePointTimer -= 5;
+      this.upgradePoints += 1;
+    }
+  }
+
+  private autoSpendCinematicUpgrades(dt: number, screen: ScreenState): void {
+    if (!this.cinematic || screen === "menu") return;
+    this.cinematicUpgradeTimer -= dt;
+    if (this.cinematicUpgradeTimer > 0 || this.upgradePoints <= 0) return;
+
+    this.cinematicUpgradeTimer = 4.2;
+    const priority: UpgradeId[] = ["swarmSpeed", "nodeFireRate", "coreShield", "repairPower"];
+    const affordable = priority
+      .map((id) => ({ id, level: this.upgradeLevels[id], cost: this.getUpgradeCost(id) }))
+      .filter((upgrade) => this.upgradePoints >= upgrade.cost)
+      .sort((a, b) => a.level - b.level || priority.indexOf(a.id) - priority.indexOf(b.id))[0];
+
+    if (affordable) this.buyUpgrade(affordable.id);
+  }
+
+  private getWorkerSpeedMultiplier(): number {
+    return 1 + this.upgradeLevels.swarmSpeed * 0.045;
+  }
+
+  private getEnergyEfficiencyMultiplier(): number {
+    return 1 + this.upgradeLevels.swarmSpeed * 0.025;
+  }
+
+  private getNodeFireRateMultiplier(): number {
+    return 1 + this.upgradeLevels.nodeFireRate * 0.075;
+  }
+
+  private getCoreDamageMultiplier(): number {
+    return 1 - Math.min(0.44, this.upgradeLevels.coreShield * 0.055);
+  }
+
+  private getInfectionResistanceMultiplier(): number {
+    return 1 - Math.min(0.34, this.upgradeLevels.coreShield * 0.04);
+  }
+
+  private getRepairMultiplier(): number {
+    return 1 + this.upgradeLevels.repairPower * 0.12;
   }
 
   addBeacon(pos: Vec2): void {
@@ -412,10 +599,16 @@ export class Simulation {
     }
 
     const infection = this.calculateInfection();
+    const workerSpeedMultiplier = this.getWorkerSpeedMultiplier();
     const activeBeacon = this.beacons.reduce<Beacon | undefined>((best, beacon) => {
       if (beacon.life <= 0) return best;
       return !best || beacon.life > best.life ? beacon : best;
     }, undefined);
+
+    if (infection > 0.16 && this.repairEventCooldown <= 0) {
+      this.repairEventCooldown = 12;
+      this.setEvent("Repair swarm mobilized", GREEN, 2.1);
+    }
 
     for (const worker of this.workers) {
       const previous = { ...worker.pos };
@@ -430,7 +623,7 @@ export class Simulation {
       }
 
       let target: Vec2 | undefined;
-      let desiredSpeed = worker.speed;
+      let desiredSpeed = worker.speed * workerSpeedMultiplier;
       let state: WorkerState = worker.carry > 0 ? "carry" : "search";
 
       const avoidance = this.getVirusAvoidance(worker.pos);
@@ -563,8 +756,9 @@ export class Simulation {
   }
 
   private deliverEnergy(worker: Worker): void {
-    const value = worker.carry;
+    const value = worker.carry * this.getEnergyEfficiencyMultiplier();
     this.core.energy = clamp(this.core.energy + value, 0, 260);
+    this.energyCollected += value;
     this.core.shockCharge = clamp(this.core.shockCharge + value / (worker.carryRare ? 70 : 120), 0, 1);
     this.core.pulse = Math.max(this.core.pulse, worker.carryRare ? 1.2 : 0.72);
     const color = worker.carryRare ? GOLD : CYAN;
@@ -614,27 +808,33 @@ export class Simulation {
   }
 
   private repairAtTarget(worker: Worker, target: RepairTarget, dt: number): void {
+    const repairMultiplier = this.getRepairMultiplier();
     if (target.kind === "node") {
       const node = this.getNode(target.id);
       if (!node) return;
-      node.infection = clamp(node.infection - dt * 0.52, 0, 1);
-      node.health = clamp(node.health + dt * 10, 0, node.maxHealth);
+      node.infection = clamp(node.infection - dt * 0.52 * repairMultiplier, 0, 1);
+      node.health = clamp(node.health + dt * 10 * repairMultiplier, 0, node.maxHealth);
       if (node.infection <= 0.02 && node.health >= node.maxHealth * 0.95) worker.repairTarget = undefined;
     } else {
       const line = this.lines.find((item) => item.id === target.id);
       if (!line) return;
-      line.infection = clamp(line.infection - dt * 0.68, 0, 1);
+      line.infection = clamp(line.infection - dt * 0.68 * repairMultiplier, 0, 1);
       if (line.infection <= 0.02) worker.repairTarget = undefined;
     }
 
-    if ((worker.id + Math.floor(this.time * 26)) % 17 === 0) {
-      this.addParticle(worker.pos, fromAngle(this.rng.range(0, TAU), this.rng.range(10, 48)), GREEN, 0.42, this.rng.range(0.9, 1.7), 12);
+    const repairLevel = this.upgradeLevels.repairPower;
+    if ((worker.id + Math.floor(this.time * (26 + repairLevel * 2))) % Math.max(9, 17 - repairLevel) === 0) {
+      const count = repairLevel >= 5 ? 2 : 1;
+      for (let i = 0; i < count; i += 1) {
+        this.addParticle(worker.pos, fromAngle(this.rng.range(0, TAU), this.rng.range(10, 58 + repairLevel * 3)), GREEN, 0.42, this.rng.range(0.9, 1.9), 12 + repairLevel * 1.5);
+      }
     }
   }
 
   private updateNodes(dt: number): void {
+    const fireRateLevel = this.upgradeLevels.nodeFireRate;
     for (const node of this.nodes) {
-      node.spin += dt * (0.8 + node.level * 0.16);
+      node.spin += dt * (0.8 + node.level * 0.16 + fireRateLevel * 0.035);
       node.overdrive = this.overdriveTimer > 0 ? 1 : Math.max(0, node.overdrive - dt * 1.5);
       node.buildProgress = clamp(node.buildProgress + dt * 0.7, 0, 1);
       node.cooldown -= dt * (node.overdrive > 0 ? 2.1 : 1) * clamp(1.2 - node.infection * 0.7, 0.25, 1.2);
@@ -653,10 +853,12 @@ export class Simulation {
 
   private fireNode(node: DefenseNode, virus: Virus): void {
     const overdrive = node.overdrive > 0 ? 1.55 : 1;
+    const fireRateMultiplier = this.getNodeFireRateMultiplier();
     const damage = (17 + node.level * 10) * overdrive * clamp(1.15 - node.infection * 0.55, 0.35, 1.15);
-    const color = node.overdrive > 0 ? WHITE : node.level >= 3 ? "#9af8ff" : CYAN;
+    const color = node.overdrive > 0 ? WHITE : this.upgradeLevels.nodeFireRate >= 6 ? "#9af8ff" : node.level >= 3 ? "#9af8ff" : CYAN;
     virus.hp -= damage;
-    node.cooldown = 1 / (node.fireRate * overdrive);
+    node.cooldown = 1 / (node.fireRate * overdrive * fireRateMultiplier);
+    this.shotsFired += 1;
     this.beams.push({
       id: this.id(),
       from: { ...node.pos },
@@ -664,7 +866,7 @@ export class Simulation {
       life: 0.16,
       maxLife: 0.16,
       color,
-      width: 1.5 + node.level * 0.6 + (node.overdrive > 0 ? 1.3 : 0),
+      width: 1.5 + node.level * 0.6 + this.upgradeLevels.nodeFireRate * 0.07 + (node.overdrive > 0 ? 1.3 : 0),
     });
     if (this.beams.length > MAX_BEAMS) this.beams.splice(0, this.beams.length - MAX_BEAMS);
 
@@ -677,6 +879,8 @@ export class Simulation {
   private updateViruses(dt: number, screen: ScreenState): void {
     if (screen === "menu") return;
 
+    const coreDamageMultiplier = this.getCoreDamageMultiplier();
+    const infectionResistance = this.getInfectionResistanceMultiplier();
     for (const virus of this.viruses) {
       if (virus.hp <= 0) continue;
       const target = this.getVirusTarget(virus);
@@ -689,9 +893,9 @@ export class Simulation {
       virus.pos = add(virus.pos, mul(virus.vel, dt));
 
       if (distance(virus.pos, this.core.pos) < CORE_RADIUS + virus.radius) {
-        const damageScale = this.cinematic ? 0.58 : 1;
+        const damageScale = (this.cinematic ? 0.58 : 1) * coreDamageMultiplier;
         this.core.health -= dt * (virus.elite ? 18 : 8.5) * damageScale;
-        this.core.energy = Math.max(0, this.core.energy - dt * 2.4);
+        this.core.energy = Math.max(0, this.core.energy - dt * 2.4 * coreDamageMultiplier);
         this.core.damageFlash = 1;
         this.screenShake = Math.max(this.screenShake, virus.elite ? 0.8 : 0.38);
         virus.hp -= dt * 95;
@@ -705,7 +909,7 @@ export class Simulation {
         if (node.buildProgress < 0.55) continue;
         const d = distance(virus.pos, node.pos);
         if (d < virus.radius + 23) {
-          node.infection = clamp(node.infection + dt * virus.infectPower * (virus.elite ? 0.36 : 0.22), 0, 1);
+          node.infection = clamp(node.infection + dt * virus.infectPower * (virus.elite ? 0.36 : 0.22) * infectionResistance, 0, 1);
           node.health = clamp(node.health - dt * (virus.elite ? 7 : 3.5), 0, node.maxHealth);
           virus.hp -= dt * (virus.elite ? 1.5 : 2.8);
           if (virus.hp <= 0) this.killVirus(virus);
@@ -715,7 +919,7 @@ export class Simulation {
       for (const line of this.lines) {
         const d = this.distanceToLine(virus.pos, line);
         if (d < virus.radius + 15) {
-          line.infection = clamp(line.infection + dt * virus.infectPower * 0.07, 0, 1);
+          line.infection = clamp(line.infection + dt * virus.infectPower * 0.07 * infectionResistance, 0, 1);
         }
       }
     }
@@ -726,6 +930,7 @@ export class Simulation {
   }
 
   private updateInfection(dt: number): void {
+    const infectionResistance = this.getInfectionResistanceMultiplier();
     for (const line of this.lines) {
       line.pulse = (line.pulse + dt * (0.1 + line.infection * 0.08)) % 1;
       line.infection = clamp(line.infection - dt * 0.006, 0, 1);
@@ -734,7 +939,7 @@ export class Simulation {
       const connectedLines = this.lines.filter((line) => line.toNodeId === node.id || line.fromNodeId === node.id);
       if (connectedLines.length > 0) {
         const linePressure = connectedLines.reduce((sum, line) => sum + line.infection, 0) / connectedLines.length;
-        node.infection = clamp(node.infection + linePressure * dt * 0.018 - dt * 0.004, 0, 1);
+        node.infection = clamp(node.infection + linePressure * dt * 0.018 * infectionResistance - dt * 0.004, 0, 1);
       } else {
         node.infection = clamp(node.infection - dt * 0.004, 0, 1);
       }
@@ -880,6 +1085,7 @@ export class Simulation {
 
     const previousNodes = [...this.nodes];
     this.nodes.push(node);
+    this.nodesBuilt += 1;
     this.lines.push({
       id: this.id(),
       toNodeId: node.id,

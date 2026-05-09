@@ -4,7 +4,7 @@ import { canvasPointerToWorld } from "./game/input";
 import { makeSeed } from "./game/random";
 import { renderSimulation } from "./game/render";
 import { Simulation } from "./game/simulation";
-import type { ScreenState, SimulationSnapshot } from "./game/types";
+import type { ScreenState, SimulationSnapshot, UpgradeId } from "./game/types";
 
 function readHighScore(): number {
   try {
@@ -32,6 +32,10 @@ function formatTime(seconds: number): string {
 
 function percent(value: number): string {
   return `${Math.round(value * 100)}%`;
+}
+
+function bonusPercent(value: number): string {
+  return `+${Math.round(value * 100)}%`;
 }
 
 export default function App() {
@@ -132,6 +136,13 @@ export default function App() {
     simulationRef.current?.triggerShockwave(false);
   };
 
+  const purchaseUpgrade = (id: UpgradeId) => {
+    if (screenRef.current !== "playing" && screenRef.current !== "paused") return;
+    const sim = simulationRef.current;
+    if (!sim?.buyUpgrade(id)) return;
+    setSnapshot(sim.getSnapshot());
+  };
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
@@ -146,6 +157,14 @@ export default function App() {
         toggleCinematic();
       } else if (key === "d") {
         setDebug((value) => !value);
+      } else if (key === "1") {
+        purchaseUpgrade("swarmSpeed");
+      } else if (key === "2") {
+        purchaseUpgrade("nodeFireRate");
+      } else if (key === "3") {
+        purchaseUpgrade("coreShield");
+      } else if (key === "4") {
+        purchaseUpgrade("repairPower");
       } else if (key === "p" || key === "escape") {
         togglePause();
       }
@@ -260,6 +279,7 @@ export default function App() {
 
   const hudVisible = !cinematic && screen !== "menu";
   const overlayVisible = screen === "menu" || screen === "paused" || screen === "coreDestroyed";
+  const upgradeViews = simulationRef.current?.getUpgradeViews() ?? [];
 
   return (
     <div className={`app ${cinematic ? "is-cinematic" : ""} state-${screen}`}>
@@ -279,9 +299,22 @@ export default function App() {
                 <strong>{formatTime(snapshot.time)}</strong>
               </div>
               <div className="stat">
+                <span>Wave</span>
+                <strong>{snapshot.wave}</strong>
+              </div>
+              <div className="stat">
                 <span>Core</span>
                 <strong>{percent(snapshot.coreHealth / 100)}</strong>
               </div>
+              <div className="stat">
+                <span>Upgrade</span>
+                <strong>{snapshot.upgradePoints}</strong>
+              </div>
+            </div>
+          )}
+
+          {hudVisible && (
+            <div className="hud hud-bottom">
               <div className="stat">
                 <span>Energy</span>
                 <strong>{Math.round(snapshot.coreEnergy)}</strong>
@@ -290,11 +323,6 @@ export default function App() {
                 <span>Infection</span>
                 <strong>{percent(snapshot.infection)}</strong>
               </div>
-            </div>
-          )}
-
-          {hudVisible && (
-            <div className="hud hud-bottom">
               <div className="stat">
                 <span>Colony</span>
                 <strong>{snapshot.workers}</strong>
@@ -306,12 +334,34 @@ export default function App() {
               <div className="stat">
                 <span>Shock</span>
                 <strong>{percent(snapshot.shockCharge)}</strong>
-              </div>
-              <div className="stat">
-                <span>Best</span>
-                <strong>{formatTime(highScore)}</strong>
+                <small>Power {bonusPercent(snapshot.shockPowerBonus)}</small>
               </div>
             </div>
+          )}
+
+          {hudVisible && (screen === "playing" || screen === "paused") && (
+            <section className="upgrades-panel" aria-label="Upgrades">
+              <header>
+                <span>Upgrades</span>
+                <strong>{snapshot.upgradePoints} pts</strong>
+              </header>
+              <div className="upgrade-list">
+                {upgradeViews.map((upgrade) => (
+                  <button
+                    key={upgrade.id}
+                    type="button"
+                    onClick={() => purchaseUpgrade(upgrade.id)}
+                    disabled={!upgrade.canBuy || screen !== "playing"}
+                    title={upgrade.description}
+                  >
+                    <span className="upgrade-key">{upgrade.shortcut}</span>
+                    <span className="upgrade-name">{upgrade.shortLabel}</span>
+                    <span className="upgrade-level">Lv {upgrade.level}</span>
+                    <span className="upgrade-cost">{upgrade.maxed ? "Max" : `${upgrade.cost} pt`}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
           )}
 
           {cinematic && screen !== "menu" && (
@@ -336,6 +386,9 @@ export default function App() {
                 <section className="menu-panel">
                   <p className="eyebrow">Synthetic colony defense</p>
                   <h1>Neon Swarm Core</h1>
+                  <p className="menu-copy">
+                    Protect the Core while workers collect energy and defense nodes fight the virus on their own. Spend Upgrade Points to strengthen the colony, trigger Shock as an emergency pulse, and use Speed to accelerate the run. Cinematic Mode keeps the swarm clean and meditative for background watching or capture.
+                  </p>
                   <div className="seed-row">
                     <span>Seed</span>
                     <strong>{seed}</strong>
