@@ -508,6 +508,36 @@ export default function App() {
                 <section className="dialog-panel danger">
                   <p className="eyebrow">Core collapsed</p>
                   <h2>{formatTime(snapshot.time)}</h2>
+                  <div className="run-summary" aria-label="Run summary">
+                    <div>
+                      <span>Best</span>
+                      <strong>{formatTime(highScore)}</strong>
+                    </div>
+                    <div>
+                      <span>Wave</span>
+                      <strong>{snapshot.wave}</strong>
+                    </div>
+                    <div>
+                      <span>Max Infection</span>
+                      <strong>{percent(snapshot.maxInfection)}</strong>
+                    </div>
+                    <div>
+                      <span>Nodes Built</span>
+                      <strong>{snapshot.nodesBuilt}</strong>
+                    </div>
+                    <div>
+                      <span>Energy</span>
+                      <strong>{Math.round(snapshot.energyCollected)}</strong>
+                    </div>
+                    <div>
+                      <span>Upgrades</span>
+                      <strong>{snapshot.upgradesPurchased}</strong>
+                    </div>
+                    <div>
+                      <span>Shocks</span>
+                      <strong>{snapshot.shocksUsed}</strong>
+                    </div>
+                  </div>
                   <div className="menu-actions">
                     <button type="button" className="primary" onClick={restartCurrentSeed}>
                       Restart

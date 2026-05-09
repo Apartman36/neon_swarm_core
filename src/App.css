@@ -340,6 +340,45 @@ button {
     0 0 0 1px rgba(255, 255, 255, 0.04) inset;
 }
 
+.run-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  margin: 16px 0 18px;
+  text-align: left;
+}
+
+.run-summary div {
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.run-summary span {
+  display: block;
+  overflow: hidden;
+  margin-bottom: 3px;
+  color: rgba(201, 238, 244, 0.66);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.run-summary strong {
+  display: block;
+  overflow: hidden;
+  color: #f5fbff;
+  font-size: 14px;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .eyebrow {
   margin: 0 0 8px;
   color: rgba(116, 246, 255, 0.82);
